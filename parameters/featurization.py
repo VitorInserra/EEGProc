@@ -3,7 +3,8 @@ import pandas as pd
 import pywt
 from math import log2, floor
 from scipy.signal import welch
-from parameters import detrend_df, _numeric_interp, bandpass_filter, FREQUENCY_BANDS
+from parameters import bandpass_filter, apply_detrend, FREQUENCY_BANDS
+
 
 '''SPECTRAL ENTROPY'''
 def psd_bandpowers(
@@ -13,26 +14,22 @@ def psd_bandpowers(
     window_sec: float = 4.0,
     overlap: float = 0.5,
     detrend: str | None = "constant",
-    relative: bool = False,
 ) -> pd.DataFrame:
-    """
-    Windowed Welch PSD band-powers per channel.
-    Returns a DataFrame with one row per window and columns "<channel>_<band>" only.
-    """
-    if detrend in {"constant", "linear"}:
-        X = detrend_df(df, kind=detrend)
-    elif detrend is None:
-        X = _numeric_interp(df)
-    else:
-        raise ValueError("detrend must be 'constant', 'linear', or None")
+    df = apply_detrend(detrend, df)
 
-    X = X.select_dtypes(include=[np.number]).copy()
-    if X.empty:
-        raise ValueError("No numeric columns after cleaning.")
+    band_keys = set(bands.keys())
+    col_band, col_chan = {}, {}
+    for col in df.columns:
+        parts = col.rsplit("_", 1)
+        if len(parts) == 2 and parts[1] in band_keys:
+            col_band[col] = parts[1]
+            col_chan[col] = parts[0]
+    if not col_band:
+        raise ValueError("No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS.")
+    df = df[list(col_band.keys())]
 
-    channels = list(X.columns)
-    n_samples = len(X)
-
+    data = df.to_numpy(dtype=float, copy=False)
+    n_samples, n_cols = data.shape
     nperseg = int(round(window_sec * fs))
     if nperseg <= 8:
         raise ValueError("window_sec too small for given fs; increase window_sec.")
@@ -41,51 +38,131 @@ def psd_bandpowers(
     hop = int(round(nperseg * (1.0 - overlap)))
     if hop <= 0:
         raise ValueError("overlap too large; hop size must be >= 1 sample.")
-
     if nperseg > n_samples:
-        band_cols = [f"{ch}_{name}" for ch in channels for name in bands]
-        return pd.DataFrame(columns=band_cols)
+        return pd.DataFrame(columns=list(df.columns))
 
-    lo_all = min(lo for lo, _ in bands.values())
-    hi_all = max(hi for _, hi in bands.values())
-
-    band_cols = [f"{ch}_{name}" for ch in channels for name in bands]
+    band_to_idx = {}
+    for i, col in enumerate(df.columns):
+        band_to_idx.setdefault(col_band[col], []).append(i)
 
     rows = []
     for start in range(0, n_samples - nperseg + 1, hop):
-        end = start + nperseg
-        seg = X.iloc[start:end]
+        seg = data[start:start + nperseg, :]
+
+        f, psd = welch(
+            seg,
+            fs=fs,
+            window="hann",
+            nperseg=nperseg,
+            noverlap=0,
+            detrend=False,
+            scaling="density",
+            return_onesided=True,
+            axis=0,
+        )
 
         row = {}
-        for ch in channels:
-            y = seg[ch].to_numpy(dtype=float, copy=False)
-            f_win, Pxx = welch(
-                y,
-                fs=fs,
-                window="hann",
-                nperseg=nperseg,
-                noverlap=0,
-                detrend=False,
-                scaling="density",
-                return_onesided=True,
-            )
+        for band, idxs in band_to_idx.items():
+            lo, hi = bands[band]
+            m = (f >= lo) & (f <= hi)
+            if not m.any():
+                for j in idxs:
+                    row[df.columns[j]] = 0.0
+                continue
 
-            if relative:
-                total_m = (f_win >= lo_all) & (f_win <= hi_all)
-                total_power = np.trapezoid(Pxx[total_m], f_win[total_m])
-                total_power = float(total_power) if total_power > 0 else np.nan
+            band_power = np.trapezoid(psd[m][:, idxs], f[m], axis=0)
+            for k, j in enumerate(idxs):
+                row[df.columns[j]] = float(band_power[k])
 
-            for name, (lo, hi) in bands.items():
-                m = (f_win >= lo) & (f_win <= hi)
-                bp = np.trapezoid(Pxx[m], f_win[m]) if m.any() else 0.0
-                if relative:
-                    bp = bp / total_power if (total_power and np.isfinite(total_power)) else np.nan
-                row[f"{ch}_{name}"] = float(bp)
 
         rows.append(row)
 
-    out = pd.DataFrame(rows)
-    return out[[c for c in band_cols if c in out.columns]]
+    return pd.DataFrame(rows, columns=list(df.columns))
+
+
+def shannons_entropy(
+    df: pd.DataFrame,
+    fs: float,
+    bands: dict[str, tuple[float, float]] = FREQUENCY_BANDS,
+    window_sec: float = 4.0,
+    overlap: float = 0.5,
+    eps: float = 1e-300,
+    detrend: str | None = "constant",
+) -> pd.DataFrame:
+    df = apply_detrend(detrend, df)
+    band_keys = set(bands.keys())
+    col_band = {}
+    for col in df.columns:
+        parts = col.rsplit("_", 1)
+        if len(parts) == 2 and parts[1] in band_keys:
+            col_band[col] = parts[1]
+    if not col_band:
+        raise ValueError("No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS.")
+    df = df[list(col_band.keys())]
+
+    data = df.to_numpy(dtype=float, copy=False)
+    n_samples, n_cols = data.shape
+    nperseg = int(round(window_sec * fs))
+    if nperseg <= 8:
+        raise ValueError("window_sec too small for given fs; increase window_sec.")
+    if not (0.0 <= overlap < 1.0):
+        raise ValueError("overlap must be in [0.0, 1.0).")
+    hop = int(round(nperseg * (1.0 - overlap)))
+    if hop <= 0:
+        raise ValueError("overlap too large; hop size must be >= 1 sample.")
+    if nperseg > n_samples:
+        return pd.DataFrame(columns=[f"{c}_entropy" for c in df.columns])
+
+    band_to_idx = {}
+    for i, col in enumerate(df.columns):
+        band_to_idx.setdefault(col_band[col], []).append(i)
+
+    rows = []
+    for start in range(0, n_samples - nperseg + 1, hop):
+        seg = data[start:start + nperseg, :]
+
+        f, psd = welch(
+            seg,
+            fs=fs,
+            window="hann",
+            nperseg=nperseg,
+            noverlap=0,
+            detrend=False,
+            scaling="density",
+            return_onesided=True,
+            axis=0,
+        ) 
+
+        row = {}
+        for band, idxs in band_to_idx.items():
+            lo, hi = bands[band]
+            m = (f >= lo) & (f <= hi)
+            count = int(np.count_nonzero(m))
+            if count < 2:
+                for j in idxs:
+                    row[f"{df.columns[j]}_entropy"] = np.nan
+                continue
+
+            band_power = psd[m][:, idxs]
+            totals = np.sum(band_power, axis=0)
+            valid = np.isfinite(totals) & (totals > 0)
+
+            p = np.empty_like(band_power)
+            p[:, valid] = band_power[:, valid] / totals[valid]
+            p[:, ~valid] = np.nan
+            p = np.clip(p, eps, 1.0)
+
+            H = -np.nansum(p * np.log2(p), axis=0)
+            H /= np.log2(count)
+
+            for k, j in enumerate(idxs):
+                row[f"{df.columns[j]}_entropy"] = float(H[k]) if np.isfinite(H[k]) else np.nan
+
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=[f"{c}_entropy" for c in df.columns])
+
+
 
 
 '''HJORTH PARAMETRIZATION'''
@@ -101,25 +178,20 @@ def hjorth_params(
     Compute Hjorth parameters per window for each numeric column in a band-passed EEG DataFrame.
 
     Returns a DataFrame with multiple rows (one per window) and wide columns:
-      <col>_activity, <col>_mobility, <col>_complexity, plus t0,t1 (seconds).
+      <col>_activity, <col>_mobility, <col>_compledfity,.
 
     Parameters
-    df : DataFrame (samples x channels/bands)
+    df : DataFrame (samples df channels/bands)
     fs : float            sampling rate (e.g., 128 for DREAMER)
     window_sec : float    window length in seconds
     step_sec : float      step between windows in seconds; defaults to window_sec (no overlap)
     detrend : {"constant","linear",None}
     eps : float           numerical guard
     """
-    if detrend in {"constant", "linear"}:
-        X = detrend_df(df, kind=detrend)
-    elif detrend is None:
-        X = _numeric_interp(df)
-    else:
-        raise ValueError("detrend must be 'constant', 'linear', or None")
-    
-    cols = list(X.columns)
-    data = X.to_numpy(dtype=float)
+    df = apply_detrend(detrend, df)    
+
+    cols = list(df.columns)
+    data = df.to_numpy(dtype=float)
     n_samples, n_cols = data.shape
 
     win = int(round(window_sec * fs))
@@ -169,10 +241,6 @@ def _choose_dwt_level(n_samples: int, fs: float, wavelet: str, min_freq: float) 
     return max(1, min(max_lvl, target))
 
 def _dwt_subband_ranges(fs: float, level: int):
-    """
-    Return dict of DWT subband -> (f_lo, f_hi):
-      D1..DL: (fs/2^(j+1), fs/2^j), A_L: (0, fs/2^(L+1))
-    """
     bands = {}
     for j in range(1, level + 1):
         f_hi = fs / (2 ** j)
@@ -182,7 +250,6 @@ def _dwt_subband_ranges(fs: float, level: int):
     return bands
 
 def _overlap(a, b):
-    """Length of overlap between intervals a=(lo,hi), b=(lo,hi), assumes lo<hi."""
     lo = max(a[0], b[0]); hi = min(a[1], b[1])
     return max(0.0, hi - lo)
 
@@ -197,23 +264,17 @@ def wavelet_band_energy(
     relative: bool = False,
     eps: float = 1e-12,
 ) -> pd.DataFrame:
-    """
-    Wavelet band energy per channel using DWT with proportional frequency-overlap mapping.
-
-    Returns a single-df DataFrame with columns like "<channel>_<band>_wenergy".
-    Set `relative=True` to normalize energies by the channel's total energy.
-    """
-    X = df.select_dtypes(include=[np.number])
-    if X.empty:
+    df = df.select_dtypes(include=[np.number])
+    if df.empty:
         raise ValueError("No numeric columns in df.")
 
     min_band_lo = min(lo for lo, _ in bands.values())
-    L = level or _choose_dwt_level(len(X), fs, wavelet, min_band_lo)
+    L = level or _choose_dwt_level(len(df), fs, wavelet, min_band_lo)
 
     out = {}
-    for ch in X.columns:
-        x = X[ch].to_numpy()
-        coeffs = pywt.wavedec(x, wavelet=wavelet, level=L, mode=mode)
+    for ch in df.columns:
+        df = df[ch].to_numpy()
+        coeffs = pywt.wavedec(df, wavelet=wavelet, level=L, mode=mode)
         cA = coeffs[0]
         cDs = coeffs[1:]
 
@@ -253,29 +314,21 @@ def wavelet_entropy(
     normalize: bool = True,
     eps: float = 1e-12,
 ) -> pd.DataFrame:
-    """
-    Wavelet (spectral) entropy per channel:
-      - Compute DWT band energies (same mapping as wavelet_band_energy_df, absolute).
-      - Convert to probabilities across bands p_k = E_k / sum(E_k).
-      - Shannon entropy H = -sum p_k log(p_k). If `normalize=True`, divide by log(K) to get [0,1].
-
-    Returns a single-df DataFrame with columns "<channel>_wwentropy".
-    """
-    X = df.select_dtypes(include=[np.number])
-    if X.empty:
+    df = df.select_dtypes(include=[np.number])
+    if df.empty:
         raise ValueError("No numeric columns in df.")
 
     # get absolute band energies
     eng = wavelet_band_energy_df(
-        df=X, fs=fs, bands=bands, wavelet=wavelet, level=level, mode=mode, relative=False, eps=eps
+        df=df, fs=fs, bands=bands, wavelet=wavelet, level=level, mode=mode, relative=False, eps=eps
     )
 
     out = {}
     K = len(bands)
     logK = np.log(K) if normalize else 1.0
 
-    for ch in X.columns:
-        # extract that channel's band energies in the canonical band order
+    for ch in df.columns:
+        # edftract that channel's band energies in the canonical band order
         vals = [float(eng[f"{ch}_{b}_wenergy"].iloc[0]) for b in bands.keys()]
         total = sum(vals) + eps
         p = np.array(vals) / total
@@ -307,5 +360,12 @@ if __name__ == "__main__":
     hj = hjorth_params(clean, FS)
     print("Hjorth Parameters\n", hj.head())
 
+    import time
+
+    start_time = time.time()
     psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
     print("PSD\n", psd_df.head())
+    
+    shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
+    print("Shannons\n", shannons_df.head())
+    print(time.time() - start_time, "seconds")

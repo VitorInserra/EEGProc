@@ -13,6 +13,16 @@ FREQUENCY_BANDS = {
 }
 
 
+def apply_detrend(detrend: str | None, df: pd.DataFrame) -> pd.DataFrame:
+    if detrend in {"constant", "linear"}:
+        X = detrend_df(df, kind=detrend)
+    elif detrend is None:
+        X = _numeric_interp(df)
+    else:
+        raise ValueError("detrend must be 'constant', 'linear', or None")
+    
+    return X
+
 def _numeric_interp(df: pd.DataFrame) -> pd.DataFrame:
     X = df.select_dtypes(include=[np.number]).astype(float).copy()
     return X.apply(lambda s: s.interpolate(limit_direction="both"))
