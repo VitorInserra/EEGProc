@@ -3,7 +3,7 @@ import pandas as pd
 import pywt
 from math import log2, floor
 from scipy.signal import welch
-from parameters import bandpass_filter, apply_detrend, FREQUENCY_BANDS
+from eegproc import bandpass_filter, apply_detrend, FREQUENCY_BANDS
 from PyEMD import EMD
 
 
