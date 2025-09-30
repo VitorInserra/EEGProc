@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 ```python
 import pandas as pd
-from parameters import bandpass_filter
+from eegproc import bandpass_filter
 
 # Example: Preprocess raw EEG data
 data: pd.DataFrame = ...  # Load your raw EEG data as a dataframe
@@ -46,7 +46,7 @@ bandpass_filtered_data: pd.DataFrame = bandpass_filter(data)
 ### Extracting Features
 
 ```python
-from parameters import psd
+from eegproc import psd
 
 # Example: get Power Spectral Density from a bandpass filtered dataframe
 psd_data: pd.DataFrame = psd(bandpass_filitered_data)
