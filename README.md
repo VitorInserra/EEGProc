@@ -65,4 +65,4 @@ Contributions are welcome! If you have ideas for new features or improvements, f
 
 ## License
 
-This project is licensed under the GPL v2 License. See the `LICENSE` file for details.
+This project is licensed under the GPLv2 License. See the `LICENSE` file for details.
