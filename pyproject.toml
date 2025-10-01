@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eegproc"
-version = "1.0.1"
+version = "1.0.0"
 description = "EEG Preprocessing and Featurization Library"
 readme = "README.md"
 authors = [{ name = "Tolas", email = "inserra.vitor@gmail.com" }]
@@ -43,16 +43,12 @@ requires-python = ">=3"
 Homepage = "https://github.com/VitorInserra/EEGProc"
 
 [tool.bumpver]
-current_version = "2025.1001-alpha"
-version_pattern = "YYYY.BUILD[-TAG]"
+current_version = "1.0.0"
+version_pattern = "MAJOR.MINOR.PATCH"
 commit_message = "bump version {old_version} -> {new_version}"
-tag_message = "{new_version}"
-tag_scope = "default"
-pre_commit_hook = ""
-post_commit_hook = ""
-commit = true
-tag = true
-push = true
+tag_message = "v{new_version}"
+tag_name = "v{new_version}"
+
 
 [tool.bumpver.file_patterns]
 "pyproject.toml" = [
