@@ -54,7 +54,7 @@ psd_data: pd.DataFrame = psd(bandpass_filitered_data)
 
 ## File Structure
 
-- `parameters/`
+- `src/eegproc/`
   - `preprocessing.py`: Contains preprocessing functions.
   - `featurization.py`: Contains feature extraction functions.
 - `requirements.txt`: Lists the dependencies required for the project.
