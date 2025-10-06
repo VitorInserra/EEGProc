@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import warnings
 from scipy.signal import butter, sosfiltfilt, iirnotch, filtfilt
 from scipy.signal import detrend as scipy_detrend
 
@@ -96,10 +97,16 @@ def bandpass_filter(
     nyq = fs / 2.0
     cols = list(df.columns)
 
-    if reref:
+    if reref and len(cols) > 1:
         car = df.mean(axis=1)
         for c in cols:
             df[c] = df[c] - car
+    elif len(cols) <= 1:
+        warnings.warn(
+            "reref=True ignored: only one channel present; CAR requires >= 2 channels.",
+            RuntimeWarning,
+        )
+
 
     df = _apply_notch_once(df, notch_hz, notch_q, nyq)
 
