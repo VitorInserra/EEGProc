@@ -3,7 +3,7 @@ import pandas as pd
 import pywt
 from math import log2, floor
 from scipy.signal import welch
-from eegproc import bandpass_filter, apply_detrend, FREQUENCY_BANDS
+from .preprocessing import bandpass_filter, apply_detrend, FREQUENCY_BANDS
 from PyEMD import EMD
 
 
@@ -510,37 +510,41 @@ if __name__ == "__main__":
     csv_path = "DREAMER.csv"
     chunk_iter = pd.read_csv(csv_path, chunksize=1)
     first_chunk = next(chunk_iter)
-    sensor_columns = [col for col in first_chunk.columns if col[len(col)-1].isdigit()]
-    print(f"Detected sensor columns: {sensor_columns}")
 
     dreamer_df = []
 
     for chunk in pd.read_csv(csv_path, chunksize=10000):
-        sensor_df = chunk[sensor_columns]
-        dreamer_df.append(sensor_df)
+        dreamer_df.append(chunk)
 
     dreamer_df = pd.concat(dreamer_df, ignore_index=True)
 
-    clean = bandpass_filter(dreamer_df, FS, bands=FREQUENCY_BANDS, low=0.5, high=45.0, notch_hz=60)
-    print("Bandpass filtering\n", clean)
+    for patient_id in dreamer_df["patient_index"].unique():
+        for video_id in dreamer_df["video_index"].unique():
+            mask = (dreamer_df['patient_index'] == patient_id) & (dreamer_df['video_index'] == video_id)
+            eeg_df = dreamer_df.loc[mask, :]
+            del eeg_df["patient_index"]
+            del eeg_df["video_index"]
 
-    hj = hjorth_params(clean, FS)
-    print("Hjorth Parameters\n", hj)
+            clean = bandpass_filter(eeg_df, FS, bands=FREQUENCY_BANDS, low=0.5, high=45.0, notch_hz=60)
+            print("Bandpass filtering\n", clean)
 
-    psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
-    print("PSD\n", psd_df)
-    
-    shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
-    print("Shannons\n", shannons_df)
+            hj = hjorth_params(clean, FS)
+            print("Hjorth Parameters\n", hj)
 
-    wt_df = wavelet_band_energy(dreamer_df, FS, bands=FREQUENCY_BANDS)
-    print("WT Energy\n", wt_df)
+            psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
+            print("PSD\n", psd_df)
+            
+            shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
+            print("Shannons\n", shannons_df)
 
-    wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)
-    print("WT Entropy\n", wt_df)
+            wt_df = wavelet_band_energy(eeg_df, FS, bands=FREQUENCY_BANDS)
+            print("WT Energy\n", wt_df)
 
-    imf_df = imf_band_energy(dreamer_df, FS)
-    print("IMF Energy\n", imf_df)
+            wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)
+            print("WT Entropy\n", wt_df)
 
-    imf_df = imf_entropy(imf_df)
-    print("IMF Entropy\n", imf_df)
+            imf_df = imf_band_energy(eeg_df, FS)
+            print("IMF Energy\n", imf_df)
+
+            imf_df = imf_entropy(imf_df)
+            print("IMF Entropy\n", imf_df)

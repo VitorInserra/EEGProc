@@ -40,7 +40,9 @@ from eegproc import bandpass_filter
 
 # Example: Preprocess raw EEG data
 data: pd.DataFrame = ...  # Load your raw EEG data as a dataframe
-bandpass_filtered_data: pd.DataFrame = bandpass_filter(data)
+mask = (data['patient_index'] == 0) & (data['video_index'] == 17)
+eeg_df = data.loc[mask, :]
+bandpass_filtered_data: pd.DataFrame = bandpass_filter(eeg_df)
 ```
 
 ### Extracting Features
