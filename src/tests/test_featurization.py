@@ -3,15 +3,31 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from eegproc.featurization import psd_bandpowers
+from eegproc.featurization import *
 from eegproc.preprocessing import FREQUENCY_BANDS
 
 FS = 128
 
+
 def make_sine(freq_hz: float, fs=FS, dur_sec=8.0, amp=1.0, phase=0.0):
-    n = int(dur_sec * fs)
+    """Make 2pi*freq*t hz sine function"""
+    n = int(dur_sec * fs)  # dur_sec gives duration of sine wave
     t = np.arange(n) / fs
     return amp * np.sin(2 * np.pi * freq_hz * t + phase)
+
+def make_white_noise(fs=FS, dur_sec=12.0, amp=1.0, seed=0):
+    rng = np.random.RandomState(seed)
+    n = int(dur_sec * fs)
+    return amp * rng.randn(n)
+
+def expected_mobility(freq_hz: float, fs=FS):
+    # mobility = ~2 * sin(pi * f / fs)
+    return 2.0 * np.sin(np.pi * freq_hz / fs)
+
+def window_rows(n_samples: int, fs=FS, window_sec=4.0, overlap=0.5):
+    win = int(round(window_sec * fs))
+    hop = int(round(win * (1.0 - overlap)))
+    return 1 + (n_samples - win) // hop
 
 @pytest.fixture
 def df_single_alpha():
@@ -20,13 +36,17 @@ def df_single_alpha():
     return pd.DataFrame({"A1_alpha": x})
 
 @pytest.fixture
+def df_theta_noise():
+    return pd.DataFrame({"A1_theta": make_white_noise(seed=42)})
+
+@pytest.fixture
 def df_mismatch_alpha_as_theta():
     """Column is named A1_theta but contains a 10 Hz sine (should integrate ~0 in theta band)."""
     x = make_sine(10.0)
     return pd.DataFrame({"A1_theta": x})
 
 @pytest.fixture
-def df_all_bands_one_each():
+def df_all_bands():
     """
     One column per band; each column contains a sine that sits
     comfortably inside its band's pass range.
@@ -44,61 +64,87 @@ def df_all_bands_one_each():
         data[f"A1_{band}"] = make_sine(f)
     return pd.DataFrame(data)
 
+@pytest.fixture
+def df_multi_freq_sines_same_amp():
+    return pd.DataFrame({ # All channels should have same amplitude
+        "A1": make_sine(2.0),
+        "A2": make_sine(10.0),
+        "A3": make_sine(35.0),
+    })
+
+@pytest.fixture
+def df_simple_sinusoid():
+    return pd.DataFrame({"A1": make_sine(10.0)})
 
 
-'''TESTS'''
-def test_psd_bandpowers_columns_and_rows(df_all_bands_one_each):
+"""TESTS"""
+
+'''Test PSD'''
+def test_psd_bandpowers_columns_and_rows(df_all_bands):
     """
     Ensures the output has the same columns and the correct number of rows
     based on window_sec and overlap.
     """
     window_sec = 4.0
     overlap = 0.5
-    n = len(df_all_bands_one_each)
+    n = len(df_all_bands)
     nperseg = int(round(window_sec * FS))
     hop = int(round(nperseg * (1.0 - overlap)))
     expected_rows = 1 + (n - nperseg) // hop
 
     out = psd_bandpowers(
-        df_all_bands_one_each, FS, FREQUENCY_BANDS, window_sec=window_sec, overlap=overlap
+        df_all_bands,
+        FS,
+        FREQUENCY_BANDS,
+        window_sec=window_sec,
+        overlap=overlap,
     )
 
-    assert list(out.columns) == list(df_all_bands_one_each.columns)
+    assert list(out.columns) == list(df_all_bands.columns)
     assert len(out) == expected_rows
 
 
 def test_band_energy_concentrates_in_matching_band(df_single_alpha):
     """
-    A 10 Hz sine named A1_alpha should produce non-trivial power in alpha,
-    and near-zero if we lie about the band suffix (theta).
+    A 10 Hz sine named A1_alpha should produce non-trivial power in alpha.
     """
-    out_alpha = psd_bandpowers(df_single_alpha, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+    out_alpha = psd_bandpowers(
+        df_single_alpha, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5
+    )
     # Power should be positive and stable across windows
     assert (out_alpha["A1_alpha"] > 0).all()
 
-def test_band_energy_is_near_zero_if_suffix_band_does_not_cover_freq(df_mismatch_alpha_as_theta):
+
+def test_band_energy_is_near_zero_if_suffix_band_does_not_cover_freq(
+    df_mismatch_alpha_as_theta,
+):
     """
     If we name the column A1_theta but put a 10 Hz sine into it, the theta
     integration (4–8 Hz) should capture ~0 power.
     """
-    out = psd_bandpowers(df_mismatch_alpha_as_theta, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
-    # Allow tiny numerical noise
+    out = psd_bandpowers(
+        df_mismatch_alpha_as_theta, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5
+    )
     assert np.all(out["A1_theta"].to_numpy() < 1e-6)
 
 
 def test_amplitude_scaling_is_quadratic_in_amp():
     """
-    Power should scale ~amplitude^2. Compare amp=2 vs amp=1 on the same 10 Hz alpha column.
+    Power should scale by amplitude squared. Compare amp=2 vs amp=1 on the same 10 Hz alpha column.
     """
     df1 = pd.DataFrame({"A1_alpha": make_sine(10.0, amp=1.0)})
     df2 = pd.DataFrame({"A1_alpha": make_sine(10.0, amp=2.0)})
 
-    p1 = psd_bandpowers(df1, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_alpha"].median()
-    p2 = psd_bandpowers(df2, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_alpha"].median()
+    p1 = psd_bandpowers(df1, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)[
+        "A1_alpha"
+    ].median()
+    p2 = psd_bandpowers(df2, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)[
+        "A1_alpha"
+    ].median()
 
-    ratio = p2 / (p1 + 1e-12)
-    # Hann/Welch/windowing cause small deviations—tolerate ~±10–15%
-    assert 3.3 < ratio < 4.7, f"Expected ~4× power, got {ratio:.2f}×"
+    ratio = p2 / (p1 + 1e-12)  # 1e-12 avoids divide by 0 but doesn't affect calculation
+    # Hann/Welch/windowing should tolerate ~10–15% deviation
+    assert 3.4 < ratio < 4.6, f"Expected ~4× power, got {ratio:.2f}×"
 
 
 def test_returns_empty_when_window_longer_than_signal():
@@ -116,9 +162,204 @@ def test_invalid_overlap_raises():
     with pytest.raises(ValueError, match="overlap must be in"):
         psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=1.1)
 
+
 def test_too_small_window_raises():
     df = pd.DataFrame({"A1_alpha": make_sine(10.0)})
     # nperseg = round(window_sec*fs) <= 8 triggers the guard
     tiny_win = 8.0 / FS  # exactly 8 samples worth
     with pytest.raises(ValueError, match="window_sec too small"):
         psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=tiny_win, overlap=0.0)
+
+
+
+'''Test Shannon's'''
+def test_entropy_columns_and_rows(df_all_bands):
+    """
+    Output columns should be <input>_entropy; number of rows should match
+    sliding-window count implied by window_sec and overlap.
+    """
+    window_sec = 4.0
+    overlap = 0.5
+    n = len(df_all_bands)
+    nperseg = int(round(window_sec * FS))
+    hop = int(round(nperseg * (1.0 - overlap)))
+    expected_rows = 1 + (n - nperseg) // hop
+
+    out = shannons_entropy(
+        df_all_bands, FS, FREQUENCY_BANDS, window_sec=window_sec, overlap=overlap
+    )
+
+    expected_cols = [f"{c}_entropy" for c in df_all_bands.columns]
+    assert list(out.columns) == expected_cols
+    assert len(out) == expected_rows
+
+
+def test_entropy_bounds_on_valid_data(df_theta_noise):
+    """
+    Shannon's entropy (normalized) is in [0, 1] whenever it's defined.
+    """
+    out = shannons_entropy(df_theta_noise, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+    vals = out["A1_theta_entropy"].to_numpy()
+    assert np.isfinite(vals).all()
+    assert (vals >= -1e-9).all() and (vals <= 1.0 + 1e-9).all()
+
+
+def test_pure_tone_has_low_entropy(df_single_alpha):
+    """
+    A narrow-line 10 Hz tone inside alpha should yield low normalized entropy
+    (power concentrated in a few bins).
+    """
+    out = shannons_entropy(df_single_alpha, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+    # Expect small values
+    assert out["A1_alpha_entropy"].median() < 0.30
+
+
+def test_white_noise_has_high_entropy(df_theta_noise):
+    """
+    Band-limited white noise should distribute power more uniformly across bins → high entropy.
+    """
+    out = shannons_entropy(df_theta_noise, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+    # Depending on band width and nperseg, expect values near 1; tolerate some variance.
+    assert out["A1_theta_entropy"].median() > 0.80
+
+
+def test_entropy_is_amplitude_invariant_for_tone():
+    """
+    Entropy is based on normalized PSD (probabilities), so scaling amplitude shouldn't change it.
+    """
+    df1 = pd.DataFrame({"A1_alpha": make_sine(10.0, amp=0.5)})
+    df2 = pd.DataFrame({"A1_alpha": make_sine(10.0, amp=2.0)})
+
+    H1 = shannons_entropy(df1, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_alpha_entropy"].median()
+    H2 = shannons_entropy(df2, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_alpha_entropy"].median()
+
+    assert abs(H1 - H2) < 0.05, f"Amplitude invariance violated: {H1:.3f} vs {H2:.3f}"
+
+
+def test_entropy_is_amplitude_invariant_for_noise():
+    df1 = pd.DataFrame({"A1_theta": make_white_noise(amp=0.5, seed=123)})
+    df2 = pd.DataFrame({"A1_theta": make_white_noise(amp=2.0, seed=123)})
+
+    H1 = shannons_entropy(df1, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_theta_entropy"].median()
+    H2 = shannons_entropy(df2, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)["A1_theta_entropy"].median()
+
+    assert abs(H1 - H2) < 0.05
+
+
+def test_returns_empty_when_window_longer_than_signal():
+    short = pd.DataFrame({"A1_alpha": make_sine(10.0, dur_sec=1.0)})  # 128 samples
+    out = shannons_entropy(short, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+    assert out.empty
+    assert list(out.columns) == ["A1_alpha_entropy"]
+
+
+def test_invalid_overlap_and_too_small_window_raise():
+    df = pd.DataFrame({"A1_alpha": make_sine(10.0)})
+
+    with pytest.raises(ValueError, match="overlap must be in"):
+        shannons_entropy(df, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=1.5)
+
+    tiny_win = 8.0 / FS  # nperseg = 8 to trigger guard
+    with pytest.raises(ValueError, match="window_sec too small"):
+        shannons_entropy(df, FS, FREQUENCY_BANDS, window_sec=tiny_win, overlap=0.0)
+
+
+'''Test Hjorth Params'''
+def test_rows_from_window_and_overlap(df_simple_sinusoid):
+    win_sec = 4.0
+    ov = 0.5
+    n = len(df_simple_sinusoid)
+    expected = window_rows(n, FS, win_sec, ov)
+
+    out = hjorth_params(df_simple_sinusoid, FS, window_sec=win_sec, overlap=ov, detrend="constant")
+    assert len(out) == expected
+
+    # Columns should be triplets per input column
+    for base in ["A1"]:
+        for suffix in ["activity", "mobility", "complexity"]:
+            assert f"{base}_{suffix}" in out.columns
+
+
+@pytest.mark.parametrize("freq", [2.0, 6.0, 10.0, 15.0, 25.0, 35.0])
+def test_hjorth_on_pure_sine_matches_theory(freq):
+    """
+    For a pure sine with zero mean:
+      activity ≈ A^2/2
+      mobility ≈ 2*sin(pi*f/fs)
+      complexity ≈ 1
+    """
+    amp = 1.6
+    df = pd.DataFrame({"X": make_sine(freq, amp=amp)})
+    out = hjorth_params(df, FS, window_sec=4.0, overlap=0.5, detrend="constant")
+
+    act = out["X_activity"].median()
+    mob = out["X_mobility"].median()
+    comp = out["X_complexity"].median()
+
+    # activity ~ A^2/2
+    expected_act = (amp ** 2) / 2.0
+    assert np.isclose(act, expected_act, rtol=0.08), f"act {act:.4f} vs {expected_act:.4f}"
+
+    # mobility ~ 2*sin(pi*f/fs)
+    expected_mob = expected_mobility(freq, FS)
+    assert np.isclose(mob, expected_mob, rtol=0.08, atol=0.01), f"mob {mob:.4f} vs {expected_mob:.4f}"
+
+    # complexity ~ 1
+    assert 0.9 <= comp <= 1.1, f"comp {comp:.3f} not ~1"
+
+
+def test_mobility_increases_with_frequency(df_multi_freq_sines_same_amp):
+    """
+    Mobility should be monotone increasing with frequency for same amplitude sines.
+    """
+    out = hjorth_params(df_multi_freq_sines_same_amp, FS, window_sec=4.0, overlap=0.5, detrend="constant")
+
+    m1 = out["A1_mobility"].median()  # 2 Hz
+    m2 = out["A2_mobility"].median()  # 10 Hz
+    m3 = out["A3_mobility"].median()  # 35 Hz
+
+    assert m1 < m2 < m3, f"Expected monotone mobility, got {m1:.3f}, {m2:.3f}, {m3:.3f}"
+
+
+def test_activity_scales_with_amplitude_mobility_complexity_invariant():
+    """
+    Double amplitude should result in 4x activity; mobility and complexity should be unchanged for a fixed freq.
+    """
+    f = 10.0
+    df1 = pd.DataFrame({"X": make_sine(f, amp=1.0)})
+    df2 = pd.DataFrame({"X": make_sine(f, amp=2.0)})
+
+    h1 = hjorth_params(df1, FS, window_sec=4.0, overlap=0.5, detrend="constant")
+    h2 = hjorth_params(df2, FS, window_sec=4.0, overlap=0.5, detrend="constant")
+
+    a1, a2 = h1["X_activity"].median(), h2["X_activity"].median()
+    m1, m2 = h1["X_mobility"].median(), h2["X_mobility"].median()
+    c1, c2 = h1["X_complexity"].median(), h2["X_complexity"].median()
+
+    # Activity ~ amplitude^2
+    ratio = a2 / (a1 + 1e-12)
+    assert 3.6 < ratio < 4.4, f"Activity ratio ~4 expected, got {ratio:.2f}"
+
+    # Mobility & complexity ~ amplitude-invariant
+    assert abs(m1 - m2) < 0.05, f"Mobility changed with amplitude: {m1:.3f} vs {m2:.3f}"
+    assert abs(c1 - c2) < 0.05, f"Complexity changed with amplitude: {c1:.3f} vs {c2:.3f}"
+
+
+def test_invalid_overlap_and_window_guard():
+    df = pd.DataFrame({"X": make_sine(10.0, dur_sec=2.0)})  # short is fine for guard tests
+
+    with pytest.raises(ValueError, match="overlap must be in"):
+        hjorth_params(df, FS, window_sec=1.0, overlap=1.2)
+
+    tiny_win = 2.0 / FS
+    with pytest.raises(ValueError, match="window_sec too small"):
+        hjorth_params(df, FS, window_sec=tiny_win, overlap=0.0)
+
+
+def test_returns_empty_if_signal_shorter_than_window():
+    """
+    If the range() over starts is empty (n_samples < win), we expect an empty DataFrame.
+    """
+    short = pd.DataFrame({"X": make_sine(10.0, dur_sec=1.0)})  # 128 samples
+    out = hjorth_params(short, FS, window_sec=4.0, overlap=0.5, detrend="constant")
+    assert out.empty
