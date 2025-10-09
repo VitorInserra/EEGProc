@@ -1,3 +1,5 @@
+![Coverage badge](coverage.svg)
+
 # EEGProc: EEG Preprocessing and Featurization Library
 
 EEGProc is a fully vectorized library designed for preprocessing and extracting features from EEG (Electroencephalogram) data. This library is optimized for performance and ease of use, making it suitable for researchers and developers working in the field of neuroscience, biomedical engineering, and machine learning.
@@ -40,7 +42,9 @@ from eegproc import bandpass_filter
 
 # Example: Preprocess raw EEG data
 data: pd.DataFrame = ...  # Load your raw EEG data as a dataframe
-bandpass_filtered_data: pd.DataFrame = bandpass_filter(data)
+mask = (data['patient_index'] == 0) & (data['video_index'] == 17)
+eeg_df = data.loc[mask, :]
+bandpass_filtered_data: pd.DataFrame = bandpass_filter(eeg_df)
 ```
 
 ### Extracting Features

@@ -59,3 +59,5 @@ tag_name = "v{new_version}"
     "{pep440_version}",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov>=4.1", "numpy"]
