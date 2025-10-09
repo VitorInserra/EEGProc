@@ -7,7 +7,9 @@ from .preprocessing import bandpass_filter, apply_detrend, FREQUENCY_BANDS
 from PyEMD import EMD
 
 
-'''SPECTRAL ENTROPY'''
+"""SPECTRAL ENTROPY"""
+
+
 def psd_bandpowers(
     df: pd.DataFrame,
     fs: float,
@@ -26,7 +28,9 @@ def psd_bandpowers(
             col_band[col] = parts[1]
             col_chan[col] = parts[0]
     if not col_band:
-        raise ValueError("No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS.")
+        raise ValueError(
+            "No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS."
+        )
     df = df[list(col_band.keys())]
 
     data = df.to_numpy(dtype=float, copy=False)
@@ -48,7 +52,7 @@ def psd_bandpowers(
 
     rows = []
     for start in range(0, n_samples - nperseg + 1, hop):
-        seg = data[start:start + nperseg, :]
+        seg = data[start : start + nperseg, :]
 
         f, psd = welch(
             seg,
@@ -75,10 +79,10 @@ def psd_bandpowers(
             for k, j in enumerate(idxs):
                 row[df.columns[j]] = float(band_power[k])
 
-
         rows.append(row)
 
     return pd.DataFrame(rows, columns=list(df.columns))
+
 
 def shannons_entropy(
     df: pd.DataFrame,
@@ -86,7 +90,7 @@ def shannons_entropy(
     bands: dict[str, tuple[float, float]] = FREQUENCY_BANDS,
     window_sec: float = 4.0,
     overlap: float = 0.5,
-    eps: float = 1e-300, # avoids 0 denominators and log(0)
+    eps: float = 1e-300,  # avoids 0 denominators and log(0)
     detrend: str | None = "constant",
 ) -> pd.DataFrame:
     df = apply_detrend(detrend, df)
@@ -97,7 +101,9 @@ def shannons_entropy(
         if len(parts) == 2 and parts[1] in band_keys:
             col_band[col] = parts[1]
     if not col_band:
-        raise ValueError("No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS.")
+        raise ValueError(
+            "No columns named like '{channel}_{band}' with band in FREQUENCY_BANDS."
+        )
     df = df[list(col_band.keys())]
 
     data = df.to_numpy(dtype=float, copy=False)
@@ -119,7 +125,7 @@ def shannons_entropy(
 
     rows = []
     for start in range(0, n_samples - nperseg + 1, hop):
-        seg = data[start:start + nperseg, :]
+        seg = data[start : start + nperseg, :]
 
         f, psd = welch(
             seg,
@@ -131,7 +137,7 @@ def shannons_entropy(
             scaling="density",
             return_onesided=True,
             axis=0,
-        ) 
+        )
 
         row = {}
         for band, idxs in band_to_idx.items():
@@ -156,14 +162,18 @@ def shannons_entropy(
             H /= np.log2(count)
 
             for k, j in enumerate(idxs):
-                row[f"{df.columns[j]}_entropy"] = float(H[k]) if np.isfinite(H[k]) else np.nan
+                row[f"{df.columns[j]}_entropy"] = (
+                    float(H[k]) if np.isfinite(H[k]) else np.nan
+                )
 
         rows.append(row)
 
     return pd.DataFrame(rows, columns=[f"{c}_entropy" for c in df.columns])
 
 
-'''HJORTH PARAMETRIZATION'''
+"""HJORTH PARAMETRIZATION"""
+
+
 def hjorth_params(
     df: pd.DataFrame,
     fs: float,
@@ -186,7 +196,7 @@ def hjorth_params(
     detrend : {"constant", "linear" ,None}
     eps : float           numerical guard
     """
-    df = apply_detrend(detrend, df)    
+    df = apply_detrend(detrend, df)
 
     cols = list(df.columns)
     data = df.to_numpy(dtype=float)
@@ -194,7 +204,9 @@ def hjorth_params(
 
     win = int(round(window_sec * fs))
     if win < 3:
-        raise ValueError("window_sec too small (need >= 3 samples for second differences).")
+        raise ValueError(
+            "window_sec too small (need >= 3 samples for second differences)."
+        )
     if not (0.0 <= overlap < 1.0):
         raise ValueError("overlap must be in [0.0, 1.0).")
 
@@ -210,15 +222,15 @@ def hjorth_params(
         if seg.shape[0] < 3:
             continue
 
-        act = np.nanvar(seg, axis=0, ddof=0) 
+        act = np.nanvar(seg, axis=0, ddof=0)
 
         dx = np.diff(seg, n=1, axis=0)
         ddx = np.diff(seg, n=2, axis=0)
 
-        var_dx = np.nanvar(dx,  axis=0, ddof=0)
+        var_dx = np.nanvar(dx, axis=0, ddof=0)
         var_ddx = np.nanvar(ddx, axis=0, ddof=0)
 
-        mob = np.sqrt((var_dx  + eps) / (act + eps))
+        mob = np.sqrt((var_dx + eps) / (act + eps))
         mob_dx = np.sqrt((var_ddx + eps) / (var_dx + eps))
         comp = mob_dx / (mob + eps)
 
@@ -233,24 +245,30 @@ def hjorth_params(
     return pd.DataFrame(rows)
 
 
-'''WAVELET FEATURES'''
-def _choose_dwt_level(n_samples: int, fs: float, wavelet: str, min_freq: float) -> int:
+"""WAVELET FEATURES"""
+
+
+def choose_dwt_level(n_samples: int, fs: float, wavelet: str, min_freq: float) -> int:
     max_lvl = pywt.dwt_max_level(n_samples, pywt.Wavelet(wavelet).dec_len)
     target = max(1, floor(log2(fs / max(min_freq, 1e-6)) - 1))
     return max(1, min(max_lvl, target))
 
-def _dwt_subband_ranges(fs: float, level: int) -> dict[str, tuple[float, float]]:
+
+def dwt_subband_ranges(fs: float, level: int) -> dict[str, tuple[float, float]]:
     bands: dict[str, tuple[float, float]] = {}
     for j in range(1, level + 1):
-        f_hi = fs / (2 ** j)
+        f_hi = fs / (2**j)
         f_lo = fs / (2 ** (j + 1))
         bands[f"D{j}"] = (f_lo, f_hi)
     bands[f"A{level}"] = (0.0, fs / (2 ** (level + 1)))
     return bands
 
+
 def _overlap(a: tuple[float, float], b: tuple[float, float]) -> float:
-    lo = max(a[0], b[0]); hi = min(a[1], b[1])
+    lo = max(a[0], b[0])
+    hi = min(a[1], b[1])
     return max(0.0, hi - lo)
+
 
 def wavelet_band_energy(
     df: pd.DataFrame,
@@ -273,42 +291,48 @@ def wavelet_band_energy(
     if hop <= 0:
         raise ValueError("overlap too large; hop size must be >= 1 sample.")
     if nperseg > n_samples:
-        return pd.DataFrame(columns=[f"{ch}_{b}_wenergy" for ch in df.columns for b in bands])
+        return pd.DataFrame(
+            columns=[f"{ch}_{b}_wenergy" for ch in df.columns for b in bands]
+        )
 
     min_band_lo = min(lo for lo, _ in bands.values())
-    L = _choose_dwt_level(n_samples=nperseg, fs=fs, wavelet=wavelet, min_freq=min_band_lo)
-    sub_ranges = _dwt_subband_ranges(fs, L)
+    L = choose_dwt_level(
+        n_samples=nperseg, fs=fs, wavelet=wavelet, min_freq=min_band_lo
+    )
+    sub_ranges = dwt_subband_ranges(fs, L)
 
     cols = [f"{ch}_{b}_wenergy" for ch in df.columns for b in bands]
     rows = []
 
     for start in range(0, n_samples - nperseg + 1, hop):
-        win = df.iloc[start:start + nperseg]
+        win = df.iloc[start : start + nperseg]
         row: dict[str, float] = {}
 
         for ch in df.columns:
             y = win[ch].to_numpy(dtype=float, copy=False)
 
-            coeffs = pywt.wavedec(y, wavelet=wavelet, level=L, mode=mode) # applies wavelet transform function
+            coeffs = pywt.wavedec(
+                y, wavelet=wavelet, level=L, mode=mode
+            )
             wv_coeff_approx = coeffs[0]
             wv_coeff_details = coeffs[1:]
 
-            sub_eng: dict[str, float] = {}
+            levels: dict[str, float] = {}
             for idx, c in enumerate(wv_coeff_details):
                 j = L - idx
-                sub_eng[f"D{j}"] = float(np.sum(c.astype(float) ** 2))
-            sub_eng[f"A{L}"] = float(np.sum(wv_coeff_approx.astype(float) ** 2))
+                levels[f"D{j}"] = float(np.sum(c.astype(float) ** 2))
+            levels[f"A{L}"] = float(np.sum(wv_coeff_approx.astype(float) ** 2))
 
             band_energy = {name: 0.0 for name in bands}
-            for sub_name, e_sub in sub_eng.items():
+            for sub_name, energy_sub in levels.items():
                 f_lo, f_hi = sub_ranges[sub_name]
                 width = (f_hi - f_lo) or 1.0
                 if width <= 0:
                     continue
-                for band_name, (blo, bhi) in bands.items():
-                    olap = _overlap((f_lo, f_hi), (blo, bhi))
+                for band_name, (band_lo, band_hi) in bands.items():
+                    olap = _overlap((f_lo, f_hi), (band_lo, band_hi))
                     if olap > 0:
-                        band_energy[band_name] += e_sub * (olap / width)
+                        band_energy[band_name] += energy_sub * (olap / width)
 
             for band_name, e in band_energy.items():
                 row[f"{ch}_{band_name}_wenergy"] = float(e)
@@ -316,6 +340,7 @@ def wavelet_band_energy(
         rows.append(row)
 
     return pd.DataFrame(rows, columns=cols)
+
 
 def wavelet_entropy(
     wv_band_energy_df: pd.DataFrame,
@@ -327,7 +352,7 @@ def wavelet_entropy(
 
     band_list = list(bands.keys())
     K = len(band_list)
-    norm = (np.log(K) if (normalize and K > 1) else 1.0)
+    norm = np.log(K) if (normalize and K > 1) else 1.0
 
     channel_to_cols: dict[str, list[str]] = {}
     for col in df.columns:
@@ -341,7 +366,9 @@ def wavelet_entropy(
             channel_to_cols.setdefault(ch, [None] * K)
 
     if not channel_to_cols:
-        raise ValueError("No columns with pattern '{channel}_{band}_wenergy' matching provided bands.")
+        raise ValueError(
+            "No columns with pattern '{channel}_{band}_wenergy' matching provided bands."
+        )
 
     for col in df.columns:
         if not col.endswith("_wenergy"):
@@ -367,7 +394,7 @@ def wavelet_entropy(
                 else:
                     v = df.iat[i, df.columns.get_loc(c)]
                     vals.append(float(v) if np.isfinite(v) else 0.0)
-            
+
             total = float(np.nansum(vals))
             total = total if (np.isfinite(total) and total > 0) else eps
 
@@ -382,7 +409,9 @@ def wavelet_entropy(
     return pd.DataFrame(rows, columns=out_cols)
 
 
-'''IMF FEATURES'''
+"""IMF FEATURES"""
+
+
 def imf_band_energy(
     df: pd.DataFrame,
     fs: float,
@@ -417,16 +446,16 @@ def imf_band_energy(
     row: dict[str, float] = {}
 
     emd._imf_cumsums = {}
-    
+
     for ch in df.columns:
         y_full = df[ch].to_numpy(dtype=float, copy=False).astype(float, copy=False)
         imfs_full = emd.emd(y_full, max_imf=max_imf_needed)
-        sq = imfs_full ** 2
-        cumsq = np.hstack([np.zeros((sq.shape[0], 1), dtype=sq.dtype),
-                        np.cumsum(sq, axis=1)])
-        
-        emd._imf_cumsums[ch] = (imfs_full, cumsq)
+        sq = imfs_full**2
+        cumsq = np.hstack(
+            [np.zeros((sq.shape[0], 1), dtype=sq.dtype), np.cumsum(sq, axis=1)]
+        )
 
+        emd._imf_cumsums[ch] = (imfs_full, cumsq)
 
     for start in range(0, n_samples - nperseg + 1, hop):
         end = start + nperseg
@@ -441,8 +470,8 @@ def imf_band_energy(
 
         rows.append(row)
 
-
     return pd.DataFrame(rows, columns=cols)
+
 
 def imf_entropy(
     imf_energy_df: pd.DataFrame,
@@ -453,7 +482,7 @@ def imf_entropy(
     df = imf_energy_df.select_dtypes(include=[np.number])
 
     k = len(bands)
-    norm = (np.log(k) if (normalize and k > 1) else 1.0)
+    norm = np.log(k) if (normalize and k > 1) else 1.0
 
     channel_to_cols: dict[str, list[str]] = {}
     suffix = "_imfenergy"
@@ -461,7 +490,7 @@ def imf_entropy(
     for col in df.columns:
         if not col.endswith(suffix):
             continue
-        ch_band = col[:-len(suffix)]
+        ch_band = col[: -len(suffix)]
         if "_" not in ch_band:
             continue
         ch, band = ch_band.rsplit("_", 1)
@@ -471,7 +500,7 @@ def imf_entropy(
     for col in df.columns:
         if not col.endswith(suffix):
             continue
-        core = col[:-len(suffix)]
+        core = col[: -len(suffix)]
         if "_" not in core:
             continue
         ch, band = core.rsplit("_", 1)
@@ -520,31 +549,24 @@ if __name__ == "__main__":
 
     for patient_id in dreamer_df["patient_index"].unique():
         for video_id in dreamer_df["video_index"].unique():
-            mask = (dreamer_df['patient_index'] == patient_id) & (dreamer_df['video_index'] == video_id)
+            mask = (dreamer_df["patient_index"] == patient_id) & (
+                dreamer_df["video_index"] == video_id
+            )
             eeg_df = dreamer_df.loc[mask, :]
             del eeg_df["patient_index"]
             del eeg_df["video_index"]
 
-            clean = bandpass_filter(eeg_df, FS, bands=FREQUENCY_BANDS, low=0.5, high=45.0, notch_hz=60)
-            print("Bandpass filtering\n", clean)
-
-            hj = hjorth_params(clean, FS)
-            print("Hjorth Parameters\n", hj)
-
-            psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
-            print("PSD\n", psd_df)
-            
-            shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
-            print("Shannons\n", shannons_df)
-
+            # clean = bandpass_filter(
+            #     eeg_df, FS, bands=FREQUENCY_BANDS, low=0.5, high=45.0, notch_hz=60
+            # )
+            # hj = hjorth_params(clean, FS)
+            # psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
+            # shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
             wt_df = wavelet_band_energy(eeg_df, FS, bands=FREQUENCY_BANDS)
-            print("WT Energy\n", wt_df)
-
+            print("Energy", wt_df)
             wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)
-            print("WT Entropy\n", wt_df)
+            print("Entropy", wt_df)
 
-            imf_df = imf_band_energy(eeg_df, FS)
-            print("IMF Energy\n", imf_df)
-
-            imf_df = imf_entropy(imf_df)
-            print("IMF Entropy\n", imf_df)
+            exit()
+            # imf_df = imf_band_energy(eeg_df, FS)
+            # imf_df = imf_entropy(imf_df)
