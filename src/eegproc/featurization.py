@@ -410,8 +410,6 @@ def wavelet_entropy(
 
 
 """IMF FEATURES"""
-
-
 def imf_band_energy(
     df: pd.DataFrame,
     fs: float,
@@ -562,11 +560,13 @@ if __name__ == "__main__":
             # hj = hjorth_params(clean, FS)
             # psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)
             # shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)
-            wt_df = wavelet_band_energy(eeg_df, FS, bands=FREQUENCY_BANDS)
-            print("Energy", wt_df)
-            wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)
-            print("Entropy", wt_df)
+            # wt_df = wavelet_band_energy(eeg_df, FS, bands=FREQUENCY_BANDS)
+            # print("Energy", wt_df)
+            # wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)
+            # print("Entropy", wt_df)
 
+            imf_df = imf_band_energy(eeg_df, FS)
+            print(imf_df)
+            imf_df = imf_entropy(imf_df)
+            print(imf_df)
             exit()
-            # imf_df = imf_band_energy(eeg_df, FS)
-            # imf_df = imf_entropy(imf_df)

@@ -13,8 +13,31 @@ from eegproc.preprocessing import FREQUENCY_BANDS
 FS = 128
 
 
-
 '''Test PSD'''
+def test_psd_raises_when_no_band_suffixed_columns():
+    df = pd.DataFrame({"A1": make_sine(10.0)})  # no "_alpha" column name
+    with pytest.raises(ValueError, match="No columns named like"):
+        psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.5)
+
+@pytest.mark.parametrize("window_sec", [0.01, 0.05])
+def test_psd_window_too_small_raises(window_sec):
+    df = pd.DataFrame({"A1_alpha": make_sine(10.0)})
+    with pytest.raises(ValueError, match="window_sec too small"):
+        psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=window_sec, overlap=0.5)
+
+@pytest.mark.parametrize("overlap", [-0.1, 1.0])
+def test_psd_overlap_bounds_raises(overlap):
+    df = pd.DataFrame({"A1_alpha": make_sine(10.0)})
+    with pytest.raises(ValueError, match="overlap must be in"):
+        psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=overlap)
+
+def test_psd_overlap_hop_zero_raises():
+    df = pd.DataFrame({"A1_alpha": make_sine(10.0)})
+    # Large overlap forces hop less than 0
+    with pytest.raises(ValueError, match="hop size must be"):
+        psd_bandpowers(df, FS, FREQUENCY_BANDS, window_sec=4.0, overlap=0.999999)
+
+
 def test_psd_bandpowers_columns_and_rows(df_all_bands: pd.DataFrame):
     """
     Ensures the output has the same columns and the correct number of rows
