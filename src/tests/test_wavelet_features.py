@@ -42,7 +42,7 @@ def test_choose_dwt_level_matches_formula(n_sec: float, wavelet, min_freq: float
 
 
 def test_choose_dwt_level_caps_at_max_for_tiny_minfreq():
-    """Extremely small min_freq drives target very high; function must cap at max level."""
+    """Extremely small min_freq makes target very high; function must cap at max level."""
     n_samples = int(8.0 * FS)
     wavelet = "db4"
     max_lvl = pywt.dwt_max_level(n_samples, pywt.Wavelet(wavelet).dec_len)
@@ -65,10 +65,10 @@ def test_dwt_subband_ranges_exact_powers_of_two_level3():
     bands = dwt_subband_ranges(FS, level)
 
     expected = {
-        "D1": (FS / 2**2, FS / 2**1),  # (32, 64)
-        "D2": (FS / 2**3, FS / 2**2),  # (16, 32)
-        "D3": (FS / 2**4, FS / 2**3),  # (8, 16)
-        "A3": (0.0, FS / 2**4),  # (0, 8)
+        "D1": (FS / 2**2, FS / 2**1), # (32, 64)
+        "D2": (FS / 2**3, FS / 2**2), # (16, 32)
+        "D3": (FS / 2**4, FS / 2**3), # (8, 16)
+        "A3": (0.0, FS / 2**4), # (0, 8)
     }
 
     assert set(bands.keys()) == set(expected.keys())
@@ -95,7 +95,7 @@ def test_dwt_subband_ranges_cover_and_partition(level):
     assert np.isclose(lo_D_last, hi_A)  # A's high equals D{L}'s low
     assert np.isclose(hi_D1, FS / 2)  # D1's high hits Nyquist freq
 
-    # Contiguity & non-overlap across D-bands
+    # Contiguity and non-overlap across D-bands
     for j in range(1, level):
         lo_next, hi_next = bands[f"D{j+1}"]
         lo_cur, hi_cur = bands[f"D{j}"]
@@ -249,7 +249,7 @@ def test_wentropy_extremes_uniform_vs_spiky():
     assert (went["uniform_wentropy"].between(0.0, 1.0)).all()
     assert (went["spiky_wentropy"].between(0.0, 1.0)).all()
 
-    # Uniform energy should be ~1.0; Spiky should be ~0.0 (allow tiny numeric slack)
+    # Uniform energy should be ~1.0; Spiky should be ~0.0 (allow small error)
     uniform_med = went["uniform_wentropy"].median()
     spiky_med = went["spiky_wentropy"].median()
 
