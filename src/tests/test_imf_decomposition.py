@@ -17,7 +17,7 @@ def test_imf_energy_columns_and_rows(df_all_bands):
         EMD_kwargs={},
     )
     expected_cols = [
-        f"{ch}_{band}_imfenergy" for ch in df_all_bands.columns for band in FREQUENCY_BANDS.keys()
+        f"{ch}_{band}_imfenergy" for ch in df_all_bands.columns for band in list(FREQUENCY_BANDS.keys())[::-1]
     ]
     assert list(out.columns) == expected_cols
 

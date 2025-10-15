@@ -7,9 +7,9 @@ from .preprocessing import bandpass_filter, apply_detrend, FREQUENCY_BANDS
 from PyEMD import EMD
 
 
-"""SPECTRAL ENTROPY"""
-
-
+# ---------------------------
+# SPECTRAL ENERGY and ENTROPY
+# ---------------------------
 def psd_bandpowers(
     df: pd.DataFrame,
     fs: float,
@@ -18,6 +18,69 @@ def psd_bandpowers(
     overlap: float = 0.5,
     detrend: str | None = "constant",
 ) -> pd.DataFrame:
+    """Compute Welch PSD band powers per channel-band column over selected window size.
+
+    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``
+    (bandpass_filter) may be used to achieve the expected table.
+    Each row of the expected df is a wave amplitude reading of the channel-band combination.
+    For each window, integrates the Welch PSD within each band using the trapezoid rule.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Bandpass Filtered EEG dataframe. Numeric columns must be named like
+        ``{channel}_{band}`` (e.g., ``AF3_alpha``).
+    fs : float
+        Sampling rate in Hz.
+    bands : dict[str, tuple[float, float]], default=FREQUENCY_BANDS
+        Mapping of band name to inclusive frequency bounds (Hz) ``(lo, hi)``.
+    window_sec : float, default=4.0
+        Window length in seconds used for Welch's method (``nperseg = round(fs*window_sec)``).
+    overlap : float, default=0.5
+        Fractional overlap in ``[0, 1)`` between consecutive windows.
+    detrend : {"constant", "linear", None}, default="constant"
+        Detrending applied before PSD computation via ``apply_detrend``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window, columns match the input band columns (e.g., ``AF3_alpha``)
+        and contain power spectral density-integrated band powers.
+
+    Raises
+    ------
+    ValueError
+        If no valid ``{channel}_{band}`` columns are found, if the window is too small,
+        or if ``overlap`` is outside ``[0, 1)``.
+
+    Notes
+    -----
+    - Uses ``scipy.signal.welch`` with a Hann window and no overlap inside the Welch call
+      (windowing/overlap are controlled at the outer sliding-window level).
+
+    Examples
+    --------
+    Minimal example with synthetic data (two channels, one band):
+
+    >>> import numpy as np, pandas as pd
+    >>> fs = 128.0
+    >>> t = np.arange(int(8*fs)) / fs   # 8 seconds
+    >>> # Two synthetic signals with an ~10 Hz component (alpha band)
+    >>> af3_alpha = 0.8*np.sin(2*np.pi*10*t) + 0.1*np.random.randn(t.size)
+    >>> f7_alpha  = 0.6*np.sin(2*np.pi*10*t + 0.7) + 0.1*np.random.randn(t.size)
+    >>> df = pd.DataFrame({
+    ...     "AF3_alpha": af3_alpha,
+    ...     "F7_alpha":  f7_alpha,
+    ... })
+    >>> bands = {"alpha": (8.0, 12.0)}
+    >>> out = psd_bandpowers(df, fs=fs, bands=bands, window_sec=2.0, overlap=0.5)
+    >>> out.head()  # doctest: +ELLIPSIS
+           AF3_alpha   F7_alpha
+    0       ...         ...
+    1       ...         ...
+    2       ...         ...
+    """
+
     df = apply_detrend(detrend, df)
 
     band_keys = set(bands.keys())
@@ -90,9 +153,51 @@ def shannons_entropy(
     bands: dict[str, tuple[float, float]] = FREQUENCY_BANDS,
     window_sec: float = 4.0,
     overlap: float = 0.5,
-    eps: float = 1e-300,  # avoids 0 denominators and log(0)
+    eps: float = 1e-300,
     detrend: str | None = "constant",
 ) -> pd.DataFrame:
+    """Compute normalized Shannon spectral entropy per channel-band over windows.
+
+    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``
+    (bandpass_filter) may be used to achieve the expected table.
+    For each ``{channel}_{band}`` column, computes a Welch PSD in the band's frequency range,
+    then it converts each windowed row (bin) of energy to probability.
+    Returns ``-Σplog2p/log2(#bins)`` in ``[0, 1]`` (NaN if insufficient bins or invalid totals).
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Bandpass Filtered EEG dataframe. Numeric columns must be named like
+        ``{channel}_{band}`` (e.g., ``AF3_alpha``).
+    fs : float
+        Sampling rate in Hz.
+    bands : dict[str, tuple[float, float]], default=FREQUENCY_BANDS
+        Mapping from band name to inclusive frequency bounds (Hz).
+    window_sec : float, default=4.0
+        Window length in seconds for Welch.
+    overlap : float, default=0.5
+        Fractional overlap in ``[0, 1)`` between windows.
+    eps : float, default=1e-300
+        Numerical guard to avoid log(0) and zero division.
+    detrend : {"constant", "linear", None}, default="constant"
+        Detrending applied before PSD and Shannons.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window. Columns are ``{channel}_{band}_entropy`` for each input band column.
+
+    Raises
+    ------
+    ValueError
+        If no band-annotated columns are found, window is too small, or overlap invalid.
+
+    Notes
+    -----
+    - Entropy is normalized by ``log2(count_of_band_bins)`` to yield values in ``[0, 1]``.
+    - Outputs NaN when a band's PSD has < 2 valid bins in a window.
+    """
+
     df = apply_detrend(detrend, df)
     band_keys = set(bands.keys())
     col_band = {}
@@ -171,9 +276,9 @@ def shannons_entropy(
     return pd.DataFrame(rows, columns=[f"{c}_entropy" for c in df.columns])
 
 
-"""HJORTH PARAMETRIZATION"""
-
-
+# ----------------------
+# Hjorth Parametrization
+# ----------------------
 def hjorth_params(
     df: pd.DataFrame,
     fs: float,
@@ -182,20 +287,41 @@ def hjorth_params(
     detrend: str | None = "constant",
     eps: float = 1e-300,
 ) -> pd.DataFrame:
-    """
-    Compute Hjorth parameters per window for each numeric column in a band-passed EEG DataFrame.
+    """Compute Hjorth parameters (activity, mobility, complexity) per channel over windows.
 
-    Returns a DataFrame with multiple rows (one per window):
-      <col>_activity, <col>_mobility, <col>_complexity
+    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.
+    For each numeric column (channel), the function computes:
+    - **Activity**: variance of the signal
+    - **Mobility**: sqrt(var(Δx) / var(x))
+    - **Complexity**: mobility(Δx) / mobility(x)
 
     Parameters
-    df : DataFrame (samples df channels/bands)
-    fs : float            sampling rate in Hz
-    window_sec : float    window length in seconds
-    step_sec : float      step between windows in seconds; defaults to window_sec (no overlap)
-    detrend : {"constant", "linear" ,None}
-    eps : float           numerical guard
+    ----------
+    df : pandas.DataFrame
+        Raw data EEG dataframe. Numeric columns.
+    fs : float
+        Sampling rate in Hz.
+    window_sec : float, default=4.0
+        Window length in seconds.
+    overlap : float, default=0.5
+        Fractional overlap in ``[0, 1)`` between windows.
+    detrend : {"constant", "linear", None}, default="constant"
+        Detrending applied per column prior to differencing.
+    eps : float, default=1e-300
+        Numerical guard to prevent division by zero.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window, with columns:
+        ``{channel}_activity``, ``{channel}_mobility``, ``{channel}_complexity``.
+
+    Raises
+    ------
+    ValueError
+        If window is too small (needs >= 3 samples) or overlap is invalid.
     """
+
     df = apply_detrend(detrend, df)
 
     cols = list(df.columns)
@@ -245,9 +371,9 @@ def hjorth_params(
     return pd.DataFrame(rows)
 
 
-"""WAVELET FEATURES"""
-
-
+# ----------------
+# WAVELET FEATURES
+# ----------------
 def choose_dwt_level(n_samples: int, fs: float, wavelet: str, min_freq: float) -> int:
     max_lvl = pywt.dwt_max_level(n_samples, pywt.Wavelet(wavelet).dec_len)
     target = max(1, floor(log2(fs / max(min_freq, 1e-6)) - 1))
@@ -255,6 +381,23 @@ def choose_dwt_level(n_samples: int, fs: float, wavelet: str, min_freq: float) -
 
 
 def dwt_subband_ranges(fs: float, level: int) -> dict[str, tuple[float, float]]:
+    """Return nominal frequency ranges (Hz) for DWT subbands up to a level.
+
+    Uses paired ranges for detail bands ``D{j}`` and the approximation band ``A{level}``.
+
+    Parameters
+    ----------
+    fs : float
+        Sampling rate in Hz.
+    level : int
+        Decomposition level (>= 1).
+
+    Returns
+    -------
+    dict[str, tuple[float, float]]
+        Mapping like ``{"D1": (f_lo, f_hi), ..., "A{level}": (0, f_c)}``.
+    """
+
     bands: dict[str, tuple[float, float]] = {}
     for j in range(1, level + 1):
         f_hi = fs / (2**j)
@@ -279,6 +422,48 @@ def wavelet_band_energy(
     window_sec: float = 4.0,
     overlap: float = 0.5,
 ) -> pd.DataFrame:
+    """Compute band energies by distributing DWT subband energies into target bands.
+
+    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.
+    For each window and channel, performs a multilevel DWT, computes energy in each
+    detail/approximation subband, then proportionally assigns subband energy to user
+    bands by frequency overlap.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Raw data EEG dataframe. Numeric columns.
+    fs : float
+        Sampling rate in Hz.
+    bands : dict[str, tuple[float, float]]
+        Target bands as ``{name: (lo, hi)}`` in Hz.
+    wavelet : str, default="db4"
+        PyWavelets wavelet name for ``pywt.wavedec``.
+    mode : str, default="periodization"
+        Signal extension mode for DWT.
+    window_sec : float, default=4.0
+        Window length in seconds.
+    overlap : float, default=0.5
+        Fractional overlap in ``[0, 1)``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window; columns: ``{channel}_{band}_wenergy`` for each
+        ``channel`` in ``df`` and each band in ``bands``.
+
+    Raises
+    ------
+    ValueError
+        If window too small, ``overlap`` invalid, or window longer than available samples.
+
+    Notes
+    -----
+    - The DWT level is chosen automatically via :func:`choose_dwt_level` to respect
+      both data length and minimum target band frequency.
+    - Energy is computed as the sum of squared coefficients per subband.
+    - Subband energy is apportioned to target bands by fractional frequency overlap.
+    """
     df = df.select_dtypes(include=[np.number])
 
     n_samples = len(df)
@@ -311,9 +496,7 @@ def wavelet_band_energy(
         for ch in df.columns:
             y = win[ch].to_numpy(dtype=float, copy=False)
 
-            coeffs = pywt.wavedec(
-                y, wavelet=wavelet, level=L, mode=mode
-            )
+            coeffs = pywt.wavedec(y, wavelet=wavelet, level=L, mode=mode)
             wv_coeff_approx = coeffs[0]
             wv_coeff_details = coeffs[1:]
 
@@ -348,6 +531,34 @@ def wavelet_entropy(
     normalize: bool = True,
     eps: float = 1e-300,
 ) -> pd.DataFrame:
+    """Compute (optionally normalized) Shannon entropy of wavelet band-energy distributions per channel.
+
+    Expects columns ``{channel}_{band}_wenergy`` where each row is a windowed wavelet band energy.
+    For each window and channel, treats the vector of ``_wenergy`` values across
+    ``bands`` as a distribution, then computes ``-Σplogp``.
+    Optionally normalizes by ``log(K)`` where ``K = len(bands)``.
+
+    Parameters
+    ----------
+    wv_band_energy_df : pandas.DataFrame
+        Output of :func:`wavelet_band_energy`; columns like ``{ch}_{band}_wenergy``.
+    bands : dict[str, tuple[float, float]]
+        Same band dictionary used for energy computation (order defines component order).
+    normalize : bool, default=True
+        If True, divide entropy by ``log(K)`` to obtain values in ``[0, 1]``.
+    eps : float, default=1e-300
+        Numerical guard for zero energies.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window, columns ``{ch}_wentropy``.
+
+    Raises
+    ------
+    ValueError
+        If no matching ``{channel}_{band}_wenergy`` columns are found.
+    """
     df = wv_band_energy_df.select_dtypes(include=[np.number]).copy()
 
     band_list = list(bands.keys())
@@ -410,14 +621,56 @@ def wavelet_entropy(
 
 
 """IMF FEATURES"""
+
+
 def imf_band_energy(
     df: pd.DataFrame,
     fs: float,
-    imf_to_band: list[str] = ["delta", "theta", "alpha", "betaL", "betaH", "gamma"],
+    imf_to_band=["gamma", "betaH", "betaL", "alpha", "theta", "delta"],
     window_sec: float = 4.0,
     overlap: float = 0.5,
     EMD_kwargs: dict = {},
 ) -> pd.DataFrame:
+    """Compute Intrinsic Mode Function (IMF) band-energy distributions per channel using
+    Emperical Mode Decomposition (EMD).
+
+    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.
+    For each column, applies EMD decomposition to find mean m(t) of envelopes (cubic splines
+    fit to extremas) and takes difference between raw data point and m(t) [d(t) = x(t) - m(t)].
+    For each window and channel, the IMF band-energy is based on the cumulative sums of the IMFs
+    returned by the EMD function.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Raw data EEG dataframe. Numeric columns.
+    fs : float
+        Sampling rate in Hz (used only for window sizing).
+    imf_to_band : list[str], default=["delta", "theta", "alpha", "betaL", "betaH", "gamma"]
+        Labels to assign to IMFs 1..K (K = number of labels).
+    window_sec : float, default=4.0
+        Window length in seconds.
+    overlap : float, default=0.5
+        Fractional overlap in ``[0, 1)``.
+    EMD_kwargs : dict, default={}
+        Extra keyword arguments passed to ``PyEMD.EMD`` (e.g., ``max_imf`` is internally set).
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window; columns: ``{channel}_{band}_imfenergy`` for each band label.
+
+    Raises
+    ------
+    ValueError
+        If window too small, overlap invalid, or window longer than available samples.
+
+    Notes
+    -----
+    - IMF indices are assigned in order to the names in ``imf_to_band``; if fewer IMFs
+      are present than labels, missing energies are filled with 0.0.
+    - The EMD is computed once per full signal and reused for all windows via cumulative sums.
+    """
 
     df = df.select_dtypes(include=[np.number])
 
@@ -449,11 +702,11 @@ def imf_band_energy(
         y_full = df[ch].to_numpy(dtype=float, copy=False).astype(float, copy=False)
         imfs_full = emd.emd(y_full, max_imf=max_imf_needed)
         sq = imfs_full**2
-        cumsq = np.hstack(
+        cum_sq = np.hstack(
             [np.zeros((sq.shape[0], 1), dtype=sq.dtype), np.cumsum(sq, axis=1)]
         )
 
-        emd._imf_cumsums[ch] = (imfs_full, cumsq)
+        emd._imf_cumsums[ch] = (imfs_full, cum_sq)
 
     for start in range(0, n_samples - nperseg + 1, hop):
         end = start + nperseg
@@ -473,10 +726,33 @@ def imf_band_energy(
 
 def imf_entropy(
     imf_energy_df: pd.DataFrame,
-    bands: list[str] = ["delta", "theta", "alpha", "betaL", "betaH", "gamma"],
+    bands=["gamma", "betaH", "betaL", "alpha", "theta", "delta"],
     normalize: bool = True,
     eps: float = 1e-300,
 ) -> pd.DataFrame:
+    """Compute (normalized) Shannon entropy of IMF energy distributions per channel.
+
+    For each window and channel, uses the vector of ``_imfenergy`` values across
+    ``bands`` as a distribution and computes ``-Σplogp``. Optionally normalizes
+    by ``log(K)`` where ``K = len(bands)``.
+
+    Parameters
+    ----------
+    imf_energy_df : pandas.DataFrame
+        Output from :func:`imf_band_energy` with columns ``{ch}_{band}_imfenergy``.
+    bands : list[str], default=["delta", "theta", "alpha", "betaL", "betaH", "gamma"]
+        Band labels (order defines component order).
+    normalize : bool, default=True
+        If True, divide entropy by ``log(K)`` to obtain values in ``[0, 1]``.
+    eps : float, default=1e-300
+        Numerical guard for zero energies.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row per window; columns ``{ch}_imfentropy``.
+    """
+
     df = imf_energy_df.select_dtypes(include=[np.number])
 
     k = len(bands)
