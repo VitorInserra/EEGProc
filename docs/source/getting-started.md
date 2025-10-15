@@ -61,12 +61,8 @@ plot_per_channel(entropy_df, title="Shannon Entropy per Channel")
 Documentation Structure
 -----------------------
 
-.. toctree::
-   :maxdepth: 2
+```{toctree}
+:maxdepth: 2
 
-   api/index
-
-Next Steps
------------
-
-- Explore :ref:`api/index` for detailed module documentation.
+api/index
+```
