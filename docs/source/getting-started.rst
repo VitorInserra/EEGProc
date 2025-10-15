@@ -8,15 +8,15 @@ Installation
 
 Install from PyPI:
 
-.. code-block:: bash
-
-    pip install eegproc
+```bash
+pip install eegproc
+```
 
 or, for the latest development version:
 
-.. code-block:: bash
-
-    pip install git+https://github.com/VitorInserra/EEGProc.git
+```bash
+pip install git+https://github.com/VitorInserra/EEGProc.git
+```
 
 Dependencies
 ------------
@@ -33,30 +33,30 @@ Quick Start
 
 1. **Import and load your EEG data:**
 
-.. code-block:: python
+```python
+import pandas as pd
+from eegproc import bandpass_filter, FREQUENCY_BANDS
 
-    import pandas as pd
-    from eegproc import bandpass_filter, FREQUENCY_BANDS
+df = pd.read_csv("my_eeg_data.csv")
+fs = 128  # Hz
+```
 
-    df = pd.read_csv("my_eeg_data.csv")
-    fs = 128  # Hz
-    
 2. **Filter and extract features:**
 
-.. code-block:: python
+```python
+clean = bandpass_filter(df, fs, bands=FREQUENCY_BANDS)
+from eegproc import shannons_entropy, hjorth_params
 
-    clean = bandpass_filter(df, fs, bands=FREQUENCY_BANDS)
-    from eegproc import shannons_entropy, hjorth_params
-
-    entropy_df = shannons_entropy(clean, fs)
-    hjorth_df  = hjorth_params(clean, fs)
+entropy_df = shannons_entropy(clean, fs)
+hjorth_df  = hjorth_params(clean, fs)
+```
 
 3. **Visualize results:**
 
-.. code-block:: python
-
-    from eegproc.plotting import plot_per_channel
-    plot_per_channel(entropy_df, title="Shannon Entropy per Channel")
+```python
+from eegproc.plotting import plot_per_channel
+plot_per_channel(entropy_df, title="Shannon Entropy per Channel")
+```
 
 Documentation Structure
 -----------------------
@@ -65,7 +65,6 @@ Documentation Structure
    :maxdepth: 2
 
    api/index
-   changelog
 
 Next Steps
 -----------
