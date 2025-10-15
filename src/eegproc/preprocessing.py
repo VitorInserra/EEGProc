@@ -154,13 +154,20 @@ def bandpass_filter(
 ) -> pd.DataFrame:
     """Applies band-pass filtering over raw EEG data on each channel.
 
+    Pipeline
+    --------
     1) Coerce to numeric (with interpolation).
+
     2) Optional common average reference (CAR) across channels (``reref=True``).
+
     3) Optional notch filtering at ``notch_hz`` (and 2x harmonics when safe).
+
     4a) If ``bands`` is a dict: apply a per-band Butterworth band-pass (SOS) and
         return columns named ``{channel}_{band}``.
+
     4b) Else: require ``(low, high)`` and apply a single band-pass to each channel,
         returning the original channel names.
+
     5) Optional constant detrending per output column.
 
     Parameters
