@@ -38,6 +38,34 @@ def detrend_df(df: pd.DataFrame, kind: str = "linear") -> pd.DataFrame:
 
 
 def _sosfiltfilt_safe(sos, y):
+    """Zero-phase Second-order Section (SOS) filter, 
+    handles NaNs and short signals.
+
+    Applies ``scipy.signal.sosfiltfilt`` to a 1-D array.
+    Linearly interpolates internal NaNs (or fills with 0.0 if 
+    too few finite samples to interpolate).
+
+    Parameters
+    ----------
+    sos : array-like
+        Second-order-sections filter coefficients as produced by
+        ``scipy.signal.butter(..., output="sos")``.
+    y : array-like of shape (n_samples,)
+        Input signal (1-D). May contain NaNs.
+
+    Returns
+    -------
+    numpy.ndarray
+        Filtered signal. If the input is all-NaN or too short, returns a
+        copy of the input (with NaNs interpolated when possible).
+
+    Notes
+    -----
+    - NaNs at the edges are handled by linear interpolation using the nearest
+      finite samples when available; otherwise they are set to 0.0.
+    - The minimum-length guard (15) prevents filtfilt endpoint artifacts
+      and poor padding when the window is too small.
+    """
     if np.all(np.isnan(y)):
         return y
     y = y.copy()
@@ -59,6 +87,38 @@ def _apply_notch_once(
     notch_q: float,
     nyq: float,
 ) -> pd.DataFrame:
+    """Apply single-pass IIR notch filtering (and optional 2x harmonic) to each column
+    to remove narrow amplitude readings over selected frequencies.
+    
+    Builds one or more IIR notch filters at the requested fundamental frequencies,
+    optionally adding a 2x harmonic notch when it is safely below Nyquist, and applies
+    zero-phase filtering (``scipy.signal.filtfilt``, ``method="gust"``) column-wise.
+
+    Parameters
+    ----------
+    dfin : pandas.DataFrame
+        Raw data EEG dataframe. Numeric columns.
+    notch_hz : float | int | list | tuple | None
+        Fundamental notch frequency (e.g., 50 or 60), or a list/tuple of such
+        frequencies. If ``None``, no notch filtering is applied.
+    notch_q : float
+        Quality factor for ``scipy.signal.iirnotch`` (higher = narrower notch).
+    nyq : float
+        Nyquist frequency (``fs/2``), used to normalize the notch frequency.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Copy of the input with the notch (and eligible 2x harmonic) applied
+        to all columns with sufficient length.
+
+    Notes
+    -----
+    - A 2x harmonic is added for each fundamental ``f0`` when ``2*f0 < nyq - 1.0``.
+    - Columns shorter than ``max(15, 3 * max(len(a), len(b)))`` samples are skipped
+      for stability.
+    - Frequencies are normalized as ``w0 = f0 / nyq`` for ``iirnotch``.
+    """
     if notch_hz is None:
         return dfin
     freqs = notch_hz if isinstance(notch_hz, (list, tuple)) else [notch_hz]
@@ -92,6 +152,71 @@ def bandpass_filter(
     reref: bool = True,
     detrend: bool = True,
 ) -> pd.DataFrame:
+    """Applies band-pass filtering over raw EEG data on each channel.
+
+    1) Coerce to numeric (with interpolation).
+    2) Optional common average reference (CAR) across channels (``reref=True``).
+    3) Optional notch filtering at ``notch_hz`` (and 2x harmonics when safe).
+    4a) If ``bands`` is a dict: apply a per-band Butterworth band-pass (SOS) and
+        return columns named ``{channel}_{band}``.
+    4b) Else: require ``(low, high)`` and apply a single band-pass to each channel,
+        returning the original channel names.
+    5) Optional constant detrending per output column.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Raw data EEG dataframe. Numeric columns; NaNs are
+        interpolated internally by ``_numeric_interp`` before filtering.
+    fs : float
+        Sampling rate in Hz.
+    bands : dict[str, tuple[float, float]] or None, default=FREQUENCY_BANDS
+        If provided, a mapping from band name to (low, high) in Hz. When given,
+        one output column per ``{channel}_{band}`` is produced. If ``None``,
+        ``low`` and ``high`` must be provided to define a single passband.
+    low : float or None, default=None
+        Low cutoff in Hz for the single band-pass path (ignored if ``bands`` provided).
+    high : float or None, default=None
+        High cutoff in Hz for the single band-pass path (ignored if ``bands`` provided).
+    order : int, default=4
+        Butterworth filter order for band-pass design.
+    notch_hz : float | int | list | tuple | None, default=[60, 120]
+        Fundamental notch frequency/frequencies. ``None`` disables notch filtering.
+    notch_q : float, default=30.0
+        Quality factor for the notch (higher = narrower).
+    reref : bool, default=True
+        If True and there are ≥2 channels, apply common average reference (CAR).
+    detrend : bool, default=True
+        If True, remove the mean (constant detrend) after filtering.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Filtered dataframe indexed like the input. If ``bands`` is provided,
+        columns are ``{channel}_{band}``; otherwise, the original channel names
+        are preserved.
+
+    Raises
+    ------
+    ValueError
+        - When ``bands`` is ``None`` and either ``low`` or ``high`` is missing.
+        - When any cutoff does not satisfy ``0 < low < high < fs/2``.
+        - When a band in ``bands`` violates Nyquist constraints.
+
+    Warnings
+    --------
+    RuntimeWarning
+        Emitted when ``reref=True`` but only one channel is present (CAR requires ≥2).
+
+    Notes
+    -----
+    - Band-pass filters are designed with ``scipy.signal.butter(..., output="sos")`` and
+      applied with a NaN-robust zero-phase filter via :func:`_sosfiltfilt_safe`.
+    - Notch filtering is applied once before band-pass filtering.
+    - Constant detrend uses ``scipy.signal.detrend(..., type="constant")``.
+    - For stability, very short columns may be skipped inside helper routines.
+    """
+        
     df = _numeric_interp(df).apply(pd.to_numeric, errors="coerce")
     df = df.astype("float64")
     nyq = fs / 2.0
@@ -106,7 +231,6 @@ def bandpass_filter(
             "reref=True ignored: only one channel present; CAR requires >= 2 channels.",
             RuntimeWarning,
         )
-
 
     df = _apply_notch_once(df, notch_hz, notch_q, nyq)
 

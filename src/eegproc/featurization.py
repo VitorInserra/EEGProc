@@ -180,7 +180,7 @@ def shannons_entropy(
     eps : float, default=1e-300
         Numerical guard to avoid log(0) and zero division.
     detrend : {"constant", "linear", None}, default="constant"
-        Detrending applied before PSD and Shannons.
+        Detrending applied before PSD and Shannon.
 
     Returns
     -------
@@ -632,7 +632,7 @@ def imf_band_energy(
     EMD_kwargs: dict = {},
 ) -> pd.DataFrame:
     """Compute Intrinsic Mode Function (IMF) band-energy distributions per channel using
-    Emperical Mode Decomposition (EMD).
+    Empirical Mode Decomposition (EMD).
 
     Expects columns named ``{channel}`` where each row is a reading of raw EEG data.
     For each column, applies EMD decomposition to find mean m(t) of envelopes (cubic splines
@@ -646,7 +646,7 @@ def imf_band_energy(
         Raw data EEG dataframe. Numeric columns.
     fs : float
         Sampling rate in Hz (used only for window sizing).
-    imf_to_band : list[str], default=["delta", "theta", "alpha", "betaL", "betaH", "gamma"]
+    imf_to_band : list[str], default=["gamma", "betaH", "betaL", "alpha", "theta", "delta"]
         Labels to assign to IMFs 1..K (K = number of labels).
     window_sec : float, default=4.0
         Window length in seconds.
@@ -740,7 +740,7 @@ def imf_entropy(
     ----------
     imf_energy_df : pandas.DataFrame
         Output from :func:`imf_band_energy` with columns ``{ch}_{band}_imfenergy``.
-    bands : list[str], default=["delta", "theta", "alpha", "betaL", "betaH", "gamma"]
+    bands : list[str], default=["gamma", "betaH", "betaL", "alpha", "theta", "delta"]
         Band labels (order defines component order).
     normalize : bool, default=True
         If True, divide entropy by ``log(K)`` to obtain values in ``[0, 1]``.
