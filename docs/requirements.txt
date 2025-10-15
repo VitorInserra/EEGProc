@@ -3,3 +3,10 @@ sphinx-rtd-theme
 myst-parser
 sphinxcontrib-napoleon
 sphinx-autodoc-typehints
+
+numpy
+pandas
+scipy
+pywt
+PyEMD
+matplotlib
