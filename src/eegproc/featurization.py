@@ -289,8 +289,9 @@ def hjorth_params(
 ) -> pd.DataFrame:
     """Compute Hjorth parameters (activity, mobility, complexity) per channel over windows.
 
-    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.
-    For each numeric column (channel), the function computes:
+    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``
+    (bandpass_filter) may be used to achieve the expected table.
+    For each numeric column, the function computes:
     - **Activity**: variance of the signal
     - **Mobility**: sqrt(var(Δx) / var(x))
     - **Complexity**: mobility(Δx) / mobility(x)
@@ -298,7 +299,8 @@ def hjorth_params(
     Parameters
     ----------
     df : pandas.DataFrame
-        Raw data EEG dataframe. Numeric columns.
+        Bandpass Filtered EEG dataframe. Numeric columns must be named like
+        ``{channel}_{band}`` (e.g., ``AF3_alpha``).
     fs : float
         Sampling rate in Hz.
     window_sec : float, default=4.0

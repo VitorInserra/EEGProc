@@ -53,12 +53,13 @@ typehints_defaults = "comma"
 always_document_param_types = True
 
 # Intersphinx: link to external docs
-intersphinx_mapping = {
-    "python": ("https://docs.python.org/3", {}),
-    "numpy": ("https://numpy.org/doc/stable/", {}),
-    "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", {}),
-    "matplotlib": ("https://matplotlib.org/stable/", {}),
-    # TODO: add others
-}
+# intersphinx_mapping = {
+#     "python": ("https://docs.python.org/3", None),
+#     "numpy": ("https://numpy.org/doc/stable/", None),
+#     "pandas": ("https://pandas.pydata.org/pandas-docs/stable/", None),
+#     "matplotlib": ("https://matplotlib.org/stable/", None),
+#     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
+#     "pywt": ("https://pywavelets.readthedocs.io/en/latest/", None),
+# }
 
 myst_enable_extensions = ["colon_fence", "deflist"]
