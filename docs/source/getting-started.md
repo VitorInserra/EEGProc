@@ -70,4 +70,3 @@ Next Steps
 -----------
 
 - Explore :ref:`api/index` for detailed module documentation.
-- See :ref:`changelog` for version history and new features.
