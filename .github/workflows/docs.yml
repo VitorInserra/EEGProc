@@ -25,11 +25,12 @@ jobs:
 
       - name: Build Sphinx
         run: |
-          python -m sphinx -W --keep-going -b html docs/source docs/build/html
-
+          pip install -e .
+          python -m sphinx -W --keep-going -b html docs/source _site
+          touch _site/.nojekyll
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/build/html
+          publish_dir: _site
           force_orphan: true
