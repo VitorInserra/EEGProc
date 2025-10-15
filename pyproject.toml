@@ -35,7 +35,8 @@ dependencies = [
     "six>=1.17.0",
     "threadpoolctl>=3.6.0",
     "tqdm>=4.67.1",
-    "tzdata>=2025.2"
+    "tzdata>=2025.2",
+    "matplotlib>=3.10.6"
 ]
 requires-python = ">=3"
 

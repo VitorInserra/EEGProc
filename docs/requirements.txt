@@ -9,3 +9,6 @@ scipy==1.15.3
 pandas==2.3.2
 pywavelets==1.8.0
 emd-signal==1.6.4
+matplotlib==3.10.6
+
+
