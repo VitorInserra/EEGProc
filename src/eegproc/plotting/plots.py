@@ -19,44 +19,89 @@ def plot_per_channel(
     channels: Optional[list[str]] = None,
     frequency_bands: Optional[list[str]] = None,
 ) -> None:
-    """
-    - Plots one stacked trace per EEG channel, aggregating over bands if present.
-    - Can filter by a subset of `channels` and/or `frequency_bands`.
-    - Should be used if columns are per-channel metrics (e.g., 'AF3_wentropy', 'F7_wentropy'),
-      or if banded metrics exist (e.g., 'AF3_delta_entropy', 'AF3_theta_entropy'), in which case
-      only the requested bands are included in the aggregation.
-    - Assumes each row summarizes a window of length `seconds` (e.g., 4 s),
-      so x = row_index * seconds.
+    """Plot stacked EEG feature traces per channel and/or band.
+
+    This function creates a vertically stacked line plot showing channel-level features 
+    (e.g., entropy or bandpower) across time windows. Each subplot corresponds to one 
+    feature column, with time on the x-axis (derived from the row index multiplied by the
+    window duration ``seconds``).
+
+    It supports filtering by subsets of channels and/or frequency bands, and automatically
+    arranges figure size and subplot layout.
 
     Parameters
     ----------
-    input_data : pd.DataFrame
-        DataFrame containing per-row metrics.
-    title : str
+    input_data : pandas.DataFrame
+        DataFrame containing per-window EEG features (e.g., from
+        :func:`shannons_entropy`, :func:`wavelet_entropy`, etc.).
+    title : str, default="Entropy Plot"
         Figure title.
-    xlabel : str
+    xlabel : str, default="Time"
         X-axis label (typically "Time").
-    seconds : float
-        Duration represented by each row, in seconds. Default 4 (typical for windowed features).
-    start_row : int
+    seconds : float, default=4.0
+        Duration represented by each row, in seconds. Used to scale the time axis.
+    start_row : int, default=0
         Inclusive start row index to plot.
-    end_row : int
-        Exclusive end row index to plot (like df.iloc[start:end]).
-    save_path : str | None, optional
-        If provided, saves the figure to this path. Otherwise shows it.
-    max_width : int | None
-        Maximum width (in inches) of the entire figure. If None, width is auto-scaled.
-    max_height_per_channel : int | None
-        Maximum height (in inches) allocated per channel subplot. If None, auto-scaled.
-    channels : list[str] | None
-        Subset of channel names to plot (e.g., ["AF3", "F7"]). If None, uses all channels detected.
-    frequency_bands : list[str] | None
-        Subset of bands to include when aggregating (e.g., ["alpha", "theta"]).
-        If None, all bands present for each channel are included.
+    end_row : int, default=1
+        Exclusive end row index (like ``df.iloc[start:end]``). If ``None``, plots until
+        the end of the DataFrame.
+    save_path : str or None, optional
+        If provided, saves the figure to this path (e.g., ``"entropy_plot.png"``).
+        Otherwise, displays it interactively via ``plt.show()``.
+    max_width : int or None, optional
+        Maximum width (in inches) of the entire figure. If ``None``, width is auto-scaled.
+    max_height_per_channel : int or None, optional
+        Maximum height (in inches) allocated per channel subplot. If ``None``, auto-scaled.
+    channels : list[str] or None, optional
+        Subset of channel names to plot (e.g., ``["AF3", "F7"]``). If ``None``, includes all.
+    frequency_bands : list[str] or None, optional
+        Subset of frequency bands to include when aggregating (e.g., ``["alpha", "theta"]``).
+        If ``None``, includes all bands found in column names.
 
-    Returns
-    -------
-    None
+    Raises
+    ------
+    ValueError
+        If ``input_data`` is empty or the specified start/end rows yields an empty range.
+
+    Notes
+    -----
+    - Each row of ``input_data`` corresponds to one analysis window (e.g., 4 seconds).
+    - Columns are expected to follow patterns like:
+      ``AF3_wentropy``, ``F7_wentropy``, ``AF3_alpha_entropy`` etc.
+    - The function automatically infers which columns to plot based on substring matches
+      for the requested ``channels`` and ``frequency_bands``.
+
+    Examples
+    --------
+    Basic synthetic example:
+
+    >>> import numpy as np, pandas as pd
+    >>> from matplotlib import pyplot as plt
+    >>> from eegproc.plotting import plot_per_channel
+    >>>
+    >>> # Simulate 3 channels and 2 bands over 100 windows
+    >>> t = np.arange(100)
+    >>> df = pd.DataFrame({
+    ...     "AF3_alpha_entropy": np.sin(0.1 * t) + 0.1*np.random.randn(100),
+    ...     "AF3_beta_entropy":  np.cos(0.1 * t) + 0.1*np.random.randn(100),
+    ...     "AF3_theta_entropy":  np.cos(0.1 * t) + 0.1*np.random.randn(100),
+    ...     "F7_alpha_entropy":  np.sin(0.1 * t + 1.0),
+    ... })
+    >>>
+    >>> # Plot only AF3 alpha and beta band entropies, for the first 50 windows
+    >>> plot_per_channel(
+    ...     df,
+    ...     title="AF3 Entropy (Synthetic Example)",
+    ...     seconds=4,
+    ...     start_row=0,
+    ...     end_row=50,
+    ...     channels=["AF3"],
+    ...     frequency_bands=["alpha", "beta"]
+    ... )
+    >>>
+    >>> # To save instead of showing:
+    >>> # plot_per_channel(df, save_path="entropy_AF3.png", channels=["AF3"])
+
     """
 
     if input_data is None or len(input_data) == 0:
