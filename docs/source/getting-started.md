@@ -64,5 +64,5 @@ Documentation Structure
 ```{toctree}
 :maxdepth: 2
 
-api/index
+api/modules
 ```
