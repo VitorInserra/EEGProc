@@ -1,0 +1,979 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>eegproc.featurization &mdash; EEGProc 1.0.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+
+  
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=8d563738"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            EEGProc
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../getting-started.html">Getting Started</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../api/modules.html">eegproc</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">EEGProc</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">eegproc.featurization</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for eegproc.featurization</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">pywt</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">math</span><span class="w"> </span><span class="kn">import</span> <span class="n">log2</span><span class="p">,</span> <span class="n">floor</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">scipy.signal</span><span class="w"> </span><span class="kn">import</span> <span class="n">welch</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.preprocessing</span><span class="w"> </span><span class="kn">import</span> <span class="n">bandpass_filter</span><span class="p">,</span> <span class="n">apply_detrend</span><span class="p">,</span> <span class="n">FREQUENCY_BANDS</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">PyEMD</span><span class="w"> </span><span class="kn">import</span> <span class="n">EMD</span>
+
+
+<span class="c1"># ---------------------------</span>
+<span class="c1"># SPECTRAL ENERGY and ENTROPY</span>
+<span class="c1"># ---------------------------</span>
+<div class="viewcode-block" id="psd_bandpowers">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.psd_bandpowers">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">psd_bandpowers</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="n">FREQUENCY_BANDS</span><span class="p">,</span>
+    <span class="n">window_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span><span class="p">,</span>
+    <span class="n">overlap</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+    <span class="n">detrend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;constant&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute Welch PSD band powers per channel-band column over selected window size.</span>
+
+<span class="sd">    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``</span>
+<span class="sd">    (bandpass_filter) may be used to achieve the expected table.</span>
+<span class="sd">    Each row of the expected df is a wave amplitude reading of the channel-band combination.</span>
+<span class="sd">    For each window, integrates the Welch PSD within each band using the trapezoid rule.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pandas.DataFrame</span>
+<span class="sd">        Bandpass Filtered EEG dataframe. Numeric columns must be named like</span>
+<span class="sd">        ``{channel}_{band}`` (e.g., ``AF3_alpha``).</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz.</span>
+<span class="sd">    bands : dict[str, tuple[float, float]], default=FREQUENCY_BANDS</span>
+<span class="sd">        Mapping of band name to inclusive frequency bounds (Hz) ``(lo, hi)``.</span>
+<span class="sd">    window_sec : float, default=4.0</span>
+<span class="sd">        Window length in seconds used for Welch&#39;s method (``nperseg = round(fs*window_sec)``).</span>
+<span class="sd">    overlap : float, default=0.5</span>
+<span class="sd">        Fractional overlap in ``[0, 1)`` between consecutive windows.</span>
+<span class="sd">    detrend : {&quot;constant&quot;, &quot;linear&quot;, None}, default=&quot;constant&quot;</span>
+<span class="sd">        Detrending applied before PSD computation via ``apply_detrend``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window, columns match the input band columns (e.g., ``AF3_alpha``)</span>
+<span class="sd">        and contain power spectral density-integrated band powers.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If no valid ``{channel}_{band}`` columns are found, if the window is too small,</span>
+<span class="sd">        or if ``overlap`` is outside ``[0, 1)``.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - Uses ``scipy.signal.welch`` with a Hann window and no overlap inside the Welch call</span>
+<span class="sd">      (windowing/overlap are controlled at the outer sliding-window level).</span>
+
+<span class="sd">    Examples</span>
+<span class="sd">    --------</span>
+<span class="sd">    Minimal example with synthetic data (two channels, one band):</span>
+
+<span class="sd">    &gt;&gt;&gt; import numpy as np, pandas as pd</span>
+<span class="sd">    &gt;&gt;&gt; fs = 128.0</span>
+<span class="sd">    &gt;&gt;&gt; t = np.arange(int(8*fs)) / fs   # 8 seconds</span>
+<span class="sd">    &gt;&gt;&gt; # Two synthetic signals with an ~10 Hz component (alpha band)</span>
+<span class="sd">    &gt;&gt;&gt; af3_alpha = 0.8*np.sin(2*np.pi*10*t) + 0.1*np.random.randn(t.size)</span>
+<span class="sd">    &gt;&gt;&gt; f7_alpha  = 0.6*np.sin(2*np.pi*10*t + 0.7) + 0.1*np.random.randn(t.size)</span>
+<span class="sd">    &gt;&gt;&gt; df = pd.DataFrame({</span>
+<span class="sd">    ...     &quot;AF3_alpha&quot;: af3_alpha,</span>
+<span class="sd">    ...     &quot;F7_alpha&quot;:  f7_alpha,</span>
+<span class="sd">    ... })</span>
+<span class="sd">    &gt;&gt;&gt; bands = {&quot;alpha&quot;: (8.0, 12.0)}</span>
+<span class="sd">    &gt;&gt;&gt; out = psd_bandpowers(df, fs=fs, bands=bands, window_sec=2.0, overlap=0.5)</span>
+<span class="sd">    &gt;&gt;&gt; out.head()  # doctest: +ELLIPSIS</span>
+<span class="sd">           AF3_alpha   F7_alpha</span>
+<span class="sd">    0       ...         ...</span>
+<span class="sd">    1       ...         ...</span>
+<span class="sd">    2       ...         ...</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">apply_detrend</span><span class="p">(</span><span class="n">detrend</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+
+    <span class="n">band_keys</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">bands</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="n">col_band</span><span class="p">,</span> <span class="n">col_chan</span> <span class="o">=</span> <span class="p">{},</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">col</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="n">band_keys</span><span class="p">:</span>
+            <span class="n">col_band</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+            <span class="n">col_chan</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">col_band</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;No columns named like &#39;</span><span class="si">{channel}</span><span class="s2">_</span><span class="si">{band}</span><span class="s2">&#39; with band in FREQUENCY_BANDS.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">col_band</span><span class="o">.</span><span class="n">keys</span><span class="p">())]</span>
+
+    <span class="n">data</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">n_samples</span><span class="p">,</span> <span class="n">n_cols</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">nperseg</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">window_sec</span> <span class="o">*</span> <span class="n">fs</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;window_sec too small for given fs; increase window_sec.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">overlap</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap must be in [0.0, 1.0).&quot;</span><span class="p">)</span>
+    <span class="n">hop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">nperseg</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">overlap</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="n">hop</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap too large; hop size must be &gt;= 1 sample.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&gt;</span> <span class="n">n_samples</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span>
+
+    <span class="n">band_to_idx</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">):</span>
+        <span class="n">band_to_idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">col_band</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">start</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_samples</span> <span class="o">-</span> <span class="n">nperseg</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">hop</span><span class="p">):</span>
+        <span class="n">seg</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">start</span> <span class="p">:</span> <span class="n">start</span> <span class="o">+</span> <span class="n">nperseg</span><span class="p">,</span> <span class="p">:]</span>
+
+        <span class="n">f</span><span class="p">,</span> <span class="n">psd</span> <span class="o">=</span> <span class="n">welch</span><span class="p">(</span>
+            <span class="n">seg</span><span class="p">,</span>
+            <span class="n">fs</span><span class="o">=</span><span class="n">fs</span><span class="p">,</span>
+            <span class="n">window</span><span class="o">=</span><span class="s2">&quot;hann&quot;</span><span class="p">,</span>
+            <span class="n">nperseg</span><span class="o">=</span><span class="n">nperseg</span><span class="p">,</span>
+            <span class="n">noverlap</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="n">detrend</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">scaling</span><span class="o">=</span><span class="s2">&quot;density&quot;</span><span class="p">,</span>
+            <span class="n">return_onesided</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">row</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">band</span><span class="p">,</span> <span class="n">idxs</span> <span class="ow">in</span> <span class="n">band_to_idx</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">bands</span><span class="p">[</span><span class="n">band</span><span class="p">]</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span> <span class="o">&gt;=</span> <span class="n">lo</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">f</span> <span class="o">&lt;=</span> <span class="n">hi</span><span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="n">m</span><span class="o">.</span><span class="n">any</span><span class="p">():</span>
+                <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">idxs</span><span class="p">:</span>
+                    <span class="n">row</span><span class="p">[</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="n">j</span><span class="p">]]</span> <span class="o">=</span> <span class="mf">0.0</span>
+                <span class="k">continue</span>
+
+            <span class="n">band_power</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">trapezoid</span><span class="p">(</span><span class="n">psd</span><span class="p">[</span><span class="n">m</span><span class="p">][:,</span> <span class="n">idxs</span><span class="p">],</span> <span class="n">f</span><span class="p">[</span><span class="n">m</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">idxs</span><span class="p">):</span>
+                <span class="n">row</span><span class="p">[</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="n">j</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">band_power</span><span class="p">[</span><span class="n">k</span><span class="p">])</span>
+
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="shannons_entropy">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.shannons_entropy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">shannons_entropy</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="n">FREQUENCY_BANDS</span><span class="p">,</span>
+    <span class="n">window_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span><span class="p">,</span>
+    <span class="n">overlap</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+    <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-300</span><span class="p">,</span>
+    <span class="n">detrend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;constant&quot;</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute normalized Shannon spectral entropy per channel-band over windows.</span>
+
+<span class="sd">    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``</span>
+<span class="sd">    (bandpass_filter) may be used to achieve the expected table.</span>
+<span class="sd">    For each ``{channel}_{band}`` column, computes a Welch PSD in the band&#39;s frequency range,</span>
+<span class="sd">    then it converts each windowed row (bin) of energy to probability.</span>
+<span class="sd">    Returns ``-Σplog2p/log2(#bins)`` in ``[0, 1]`` (NaN if insufficient bins or invalid totals).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pandas.DataFrame</span>
+<span class="sd">        Bandpass Filtered EEG dataframe. Numeric columns must be named like</span>
+<span class="sd">        ``{channel}_{band}`` (e.g., ``AF3_alpha``).</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz.</span>
+<span class="sd">    bands : dict[str, tuple[float, float]], default=FREQUENCY_BANDS</span>
+<span class="sd">        Mapping from band name to inclusive frequency bounds (Hz).</span>
+<span class="sd">    window_sec : float, default=4.0</span>
+<span class="sd">        Window length in seconds for Welch.</span>
+<span class="sd">    overlap : float, default=0.5</span>
+<span class="sd">        Fractional overlap in ``[0, 1)`` between windows.</span>
+<span class="sd">    eps : float, default=1e-300</span>
+<span class="sd">        Numerical guard to avoid log(0) and zero division.</span>
+<span class="sd">    detrend : {&quot;constant&quot;, &quot;linear&quot;, None}, default=&quot;constant&quot;</span>
+<span class="sd">        Detrending applied before PSD and Shannon.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window. Columns are ``{channel}_{band}_entropy`` for each input band column.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If no band-annotated columns are found, window is too small, or overlap invalid.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - Entropy is normalized by ``log2(count_of_band_bins)`` to yield values in ``[0, 1]``.</span>
+<span class="sd">    - Outputs NaN when a band&#39;s PSD has &lt; 2 valid bins in a window.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">apply_detrend</span><span class="p">(</span><span class="n">detrend</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+    <span class="n">band_keys</span> <span class="o">=</span> <span class="nb">set</span><span class="p">(</span><span class="n">bands</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="n">col_band</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">parts</span> <span class="o">=</span> <span class="n">col</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">parts</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="ow">in</span> <span class="n">band_keys</span><span class="p">:</span>
+            <span class="n">col_band</span><span class="p">[</span><span class="n">col</span><span class="p">]</span> <span class="o">=</span> <span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">col_band</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;No columns named like &#39;</span><span class="si">{channel}</span><span class="s2">_</span><span class="si">{band}</span><span class="s2">&#39; with band in FREQUENCY_BANDS.&quot;</span>
+        <span class="p">)</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="nb">list</span><span class="p">(</span><span class="n">col_band</span><span class="o">.</span><span class="n">keys</span><span class="p">())]</span>
+
+    <span class="n">data</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">n_samples</span><span class="p">,</span> <span class="n">n_cols</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span>
+    <span class="n">nperseg</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">window_sec</span> <span class="o">*</span> <span class="n">fs</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;window_sec too small for given fs; increase window_sec.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">overlap</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap must be in [0.0, 1.0).&quot;</span><span class="p">)</span>
+    <span class="n">hop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">nperseg</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">overlap</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="n">hop</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap too large; hop size must be &gt;= 1 sample.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&gt;</span> <span class="n">n_samples</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_entropy&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">])</span>
+
+    <span class="n">band_to_idx</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">col</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">):</span>
+        <span class="n">band_to_idx</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">col_band</span><span class="p">[</span><span class="n">col</span><span class="p">],</span> <span class="p">[])</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">start</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_samples</span> <span class="o">-</span> <span class="n">nperseg</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">hop</span><span class="p">):</span>
+        <span class="n">seg</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">start</span> <span class="p">:</span> <span class="n">start</span> <span class="o">+</span> <span class="n">nperseg</span><span class="p">,</span> <span class="p">:]</span>
+
+        <span class="n">f</span><span class="p">,</span> <span class="n">psd</span> <span class="o">=</span> <span class="n">welch</span><span class="p">(</span>
+            <span class="n">seg</span><span class="p">,</span>
+            <span class="n">fs</span><span class="o">=</span><span class="n">fs</span><span class="p">,</span>
+            <span class="n">window</span><span class="o">=</span><span class="s2">&quot;hann&quot;</span><span class="p">,</span>
+            <span class="n">nperseg</span><span class="o">=</span><span class="n">nperseg</span><span class="p">,</span>
+            <span class="n">noverlap</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+            <span class="n">detrend</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">scaling</span><span class="o">=</span><span class="s2">&quot;density&quot;</span><span class="p">,</span>
+            <span class="n">return_onesided</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">row</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">band</span><span class="p">,</span> <span class="n">idxs</span> <span class="ow">in</span> <span class="n">band_to_idx</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">lo</span><span class="p">,</span> <span class="n">hi</span> <span class="o">=</span> <span class="n">bands</span><span class="p">[</span><span class="n">band</span><span class="p">]</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">f</span> <span class="o">&gt;=</span> <span class="n">lo</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">f</span> <span class="o">&lt;=</span> <span class="n">hi</span><span class="p">)</span>
+            <span class="n">count</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">count_nonzero</span><span class="p">(</span><span class="n">m</span><span class="p">))</span>
+            <span class="k">if</span> <span class="n">count</span> <span class="o">&lt;</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">idxs</span><span class="p">:</span>
+                    <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="si">}</span><span class="s2">_entropy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+                <span class="k">continue</span>
+
+            <span class="n">band_power</span> <span class="o">=</span> <span class="n">psd</span><span class="p">[</span><span class="n">m</span><span class="p">][:,</span> <span class="n">idxs</span><span class="p">]</span>
+            <span class="n">totals</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">band_power</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">valid</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">totals</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">totals</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">band_power</span><span class="p">)</span>
+            <span class="n">p</span><span class="p">[:,</span> <span class="n">valid</span><span class="p">]</span> <span class="o">=</span> <span class="n">band_power</span><span class="p">[:,</span> <span class="n">valid</span><span class="p">]</span> <span class="o">/</span> <span class="n">totals</span><span class="p">[</span><span class="n">valid</span><span class="p">]</span>
+            <span class="n">p</span><span class="p">[:,</span> <span class="o">~</span><span class="n">valid</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">eps</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+
+            <span class="n">H</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">p</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">p</span><span class="p">),</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+            <span class="n">H</span> <span class="o">/=</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">count</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">idxs</span><span class="p">):</span>
+                <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="si">}</span><span class="s2">_entropy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="nb">float</span><span class="p">(</span><span class="n">H</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">H</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+                <span class="p">)</span>
+
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_entropy&quot;</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">])</span></div>
+
+
+
+<span class="c1"># ----------------------</span>
+<span class="c1"># Hjorth Parametrization</span>
+<span class="c1"># ----------------------</span>
+<div class="viewcode-block" id="hjorth_params">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.hjorth_params">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">hjorth_params</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">window_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span><span class="p">,</span>
+    <span class="n">overlap</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+    <span class="n">detrend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;constant&quot;</span><span class="p">,</span>
+    <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-300</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute Hjorth parameters (activity, mobility, complexity) per channel over windows.</span>
+
+<span class="sd">    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``</span>
+<span class="sd">    (bandpass_filter) may be used to achieve the expected table.</span>
+<span class="sd">    For each numeric column, the function computes:</span>
+<span class="sd">    - **Activity**: variance of the signal</span>
+<span class="sd">    - **Mobility**: sqrt(var(Δx) / var(x))</span>
+<span class="sd">    - **Complexity**: mobility(Δx) / mobility(x)</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pandas.DataFrame</span>
+<span class="sd">        Bandpass Filtered EEG dataframe. Numeric columns must be named like</span>
+<span class="sd">        ``{channel}_{band}`` (e.g., ``AF3_alpha``).</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz.</span>
+<span class="sd">    window_sec : float, default=4.0</span>
+<span class="sd">        Window length in seconds.</span>
+<span class="sd">    overlap : float, default=0.5</span>
+<span class="sd">        Fractional overlap in ``[0, 1)`` between windows.</span>
+<span class="sd">    detrend : {&quot;constant&quot;, &quot;linear&quot;, None}, default=&quot;constant&quot;</span>
+<span class="sd">        Detrending applied per column prior to differencing.</span>
+<span class="sd">    eps : float, default=1e-300</span>
+<span class="sd">        Numerical guard to prevent division by zero.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window, with columns:</span>
+<span class="sd">        ``{channel}_activity``, ``{channel}_mobility``, ``{channel}_complexity``.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If window is too small (needs &gt;= 3 samples) or overlap is invalid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">apply_detrend</span><span class="p">(</span><span class="n">detrend</span><span class="p">,</span> <span class="n">df</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span>
+    <span class="n">n_samples</span><span class="p">,</span> <span class="n">n_cols</span> <span class="o">=</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span>
+
+    <span class="n">win</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">window_sec</span> <span class="o">*</span> <span class="n">fs</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">win</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;window_sec too small (need &gt;= 3 samples for second differences).&quot;</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">overlap</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap must be in [0.0, 1.0).&quot;</span><span class="p">)</span>
+
+    <span class="n">hop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">win</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">overlap</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="n">hop</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap too large; hop size must be &gt;= 1 sample.&quot;</span><span class="p">)</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">starts</span> <span class="o">=</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_samples</span> <span class="o">-</span> <span class="n">win</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">hop</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i0</span> <span class="ow">in</span> <span class="n">starts</span><span class="p">:</span>
+        <span class="n">i1</span> <span class="o">=</span> <span class="n">i0</span> <span class="o">+</span> <span class="n">win</span>
+        <span class="n">seg</span> <span class="o">=</span> <span class="n">data</span><span class="p">[</span><span class="n">i0</span><span class="p">:</span><span class="n">i1</span><span class="p">,</span> <span class="p">:]</span>
+        <span class="k">if</span> <span class="n">seg</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">&lt;</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="k">continue</span>
+
+        <span class="n">act</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanvar</span><span class="p">(</span><span class="n">seg</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">ddof</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">dx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">seg</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">ddx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">diff</span><span class="p">(</span><span class="n">seg</span><span class="p">,</span> <span class="n">n</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">var_dx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanvar</span><span class="p">(</span><span class="n">dx</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">ddof</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="n">var_ddx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nanvar</span><span class="p">(</span><span class="n">ddx</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">ddof</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+
+        <span class="n">mob</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">var_dx</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">act</span> <span class="o">+</span> <span class="n">eps</span><span class="p">))</span>
+        <span class="n">mob_dx</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">((</span><span class="n">var_ddx</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">var_dx</span> <span class="o">+</span> <span class="n">eps</span><span class="p">))</span>
+        <span class="n">comp</span> <span class="o">=</span> <span class="n">mob_dx</span> <span class="o">/</span> <span class="p">(</span><span class="n">mob</span> <span class="o">+</span> <span class="n">eps</span><span class="p">)</span>
+
+        <span class="n">row</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">cols</span><span class="p">):</span>
+            <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_activity&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">act</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">act</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+            <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_mobility&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">mob</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">mob</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+            <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">c</span><span class="si">}</span><span class="s2">_complexity&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">comp</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">comp</span><span class="p">[</span><span class="n">k</span><span class="p">])</span> <span class="k">else</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">)</span></div>
+
+
+
+<span class="c1"># ----------------</span>
+<span class="c1"># WAVELET FEATURES</span>
+<span class="c1"># ----------------</span>
+<div class="viewcode-block" id="choose_dwt_level">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.choose_dwt_level">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">choose_dwt_level</span><span class="p">(</span><span class="n">n_samples</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">wavelet</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">min_freq</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+    <span class="n">max_lvl</span> <span class="o">=</span> <span class="n">pywt</span><span class="o">.</span><span class="n">dwt_max_level</span><span class="p">(</span><span class="n">n_samples</span><span class="p">,</span> <span class="n">pywt</span><span class="o">.</span><span class="n">Wavelet</span><span class="p">(</span><span class="n">wavelet</span><span class="p">)</span><span class="o">.</span><span class="n">dec_len</span><span class="p">)</span>
+    <span class="n">target</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">floor</span><span class="p">(</span><span class="n">log2</span><span class="p">(</span><span class="n">fs</span> <span class="o">/</span> <span class="nb">max</span><span class="p">(</span><span class="n">min_freq</span><span class="p">,</span> <span class="mf">1e-6</span><span class="p">))</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">min</span><span class="p">(</span><span class="n">max_lvl</span><span class="p">,</span> <span class="n">target</span><span class="p">))</span></div>
+
+
+
+<div class="viewcode-block" id="dwt_subband_ranges">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.dwt_subband_ranges">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">dwt_subband_ranges</span><span class="p">(</span><span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">level</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return nominal frequency ranges (Hz) for DWT subbands up to a level.</span>
+
+<span class="sd">    Uses paired ranges for detail bands ``D{j}`` and the approximation band ``A{level}``.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz.</span>
+<span class="sd">    level : int</span>
+<span class="sd">        Decomposition level (&gt;= 1).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    dict[str, tuple[float, float]]</span>
+<span class="sd">        Mapping like ``{&quot;D1&quot;: (f_lo, f_hi), ..., &quot;A{level}&quot;: (0, f_c)}``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">level</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="n">f_hi</span> <span class="o">=</span> <span class="n">fs</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span><span class="o">**</span><span class="n">j</span><span class="p">)</span>
+        <span class="n">f_lo</span> <span class="o">=</span> <span class="n">fs</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">j</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="n">bands</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;D</span><span class="si">{</span><span class="n">j</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">f_lo</span><span class="p">,</span> <span class="n">f_hi</span><span class="p">)</span>
+    <span class="n">bands</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;A</span><span class="si">{</span><span class="n">level</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">fs</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">level</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)))</span>
+    <span class="k">return</span> <span class="n">bands</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_overlap</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">],</span> <span class="n">b</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+    <span class="n">lo</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">b</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="n">hi</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">a</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">b</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+    <span class="k">return</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">hi</span> <span class="o">-</span> <span class="n">lo</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="wavelet_band_energy">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.wavelet_band_energy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">wavelet_band_energy</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]],</span>
+    <span class="n">wavelet</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;db4&quot;</span><span class="p">,</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;periodization&quot;</span><span class="p">,</span>
+    <span class="n">window_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span><span class="p">,</span>
+    <span class="n">overlap</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute band energies by distributing DWT subband energies into target bands.</span>
+
+<span class="sd">    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.</span>
+<span class="sd">    For each window and channel, performs a multilevel DWT, computes energy in each</span>
+<span class="sd">    detail/approximation subband, then proportionally assigns subband energy to user</span>
+<span class="sd">    bands by frequency overlap.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pandas.DataFrame</span>
+<span class="sd">        Raw data EEG dataframe. Numeric columns.</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz.</span>
+<span class="sd">    bands : dict[str, tuple[float, float]]</span>
+<span class="sd">        Target bands as ``{name: (lo, hi)}`` in Hz.</span>
+<span class="sd">    wavelet : str, default=&quot;db4&quot;</span>
+<span class="sd">        PyWavelets wavelet name for ``pywt.wavedec``.</span>
+<span class="sd">    mode : str, default=&quot;periodization&quot;</span>
+<span class="sd">        Signal extension mode for DWT.</span>
+<span class="sd">    window_sec : float, default=4.0</span>
+<span class="sd">        Window length in seconds.</span>
+<span class="sd">    overlap : float, default=0.5</span>
+<span class="sd">        Fractional overlap in ``[0, 1)``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window; columns: ``{channel}_{band}_wenergy`` for each</span>
+<span class="sd">        ``channel`` in ``df`` and each band in ``bands``.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If window too small, ``overlap`` invalid, or window longer than available samples.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - The DWT level is chosen automatically via :func:`choose_dwt_level` to respect</span>
+<span class="sd">      both data length and minimum target band frequency.</span>
+<span class="sd">    - Energy is computed as the sum of squared coefficients per subband.</span>
+<span class="sd">    - Subband energy is apportioned to target bands by fractional frequency overlap.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">number</span><span class="p">])</span>
+
+    <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">nperseg</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">window_sec</span> <span class="o">*</span> <span class="n">fs</span><span class="p">))</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;window_sec too small for given fs; increase window_sec.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">overlap</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap must be in [0.0, 1.0).&quot;</span><span class="p">)</span>
+    <span class="n">hop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">nperseg</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">overlap</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="n">hop</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap too large; hop size must be &gt;= 1 sample.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&gt;</span> <span class="n">n_samples</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span>
+            <span class="n">columns</span><span class="o">=</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">_wenergy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">]</span>
+        <span class="p">)</span>
+
+    <span class="n">min_band_lo</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">lo</span> <span class="k">for</span> <span class="n">lo</span><span class="p">,</span> <span class="n">_</span> <span class="ow">in</span> <span class="n">bands</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">L</span> <span class="o">=</span> <span class="n">choose_dwt_level</span><span class="p">(</span>
+        <span class="n">n_samples</span><span class="o">=</span><span class="n">nperseg</span><span class="p">,</span> <span class="n">fs</span><span class="o">=</span><span class="n">fs</span><span class="p">,</span> <span class="n">wavelet</span><span class="o">=</span><span class="n">wavelet</span><span class="p">,</span> <span class="n">min_freq</span><span class="o">=</span><span class="n">min_band_lo</span>
+    <span class="p">)</span>
+    <span class="n">sub_ranges</span> <span class="o">=</span> <span class="n">dwt_subband_ranges</span><span class="p">(</span><span class="n">fs</span><span class="p">,</span> <span class="n">L</span><span class="p">)</span>
+
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">b</span><span class="si">}</span><span class="s2">_wenergy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">for</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">]</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">start</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_samples</span> <span class="o">-</span> <span class="n">nperseg</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">hop</span><span class="p">):</span>
+        <span class="n">win</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="n">start</span> <span class="p">:</span> <span class="n">start</span> <span class="o">+</span> <span class="n">nperseg</span><span class="p">]</span>
+        <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="n">y</span> <span class="o">=</span> <span class="n">win</span><span class="p">[</span><span class="n">ch</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+
+            <span class="n">coeffs</span> <span class="o">=</span> <span class="n">pywt</span><span class="o">.</span><span class="n">wavedec</span><span class="p">(</span><span class="n">y</span><span class="p">,</span> <span class="n">wavelet</span><span class="o">=</span><span class="n">wavelet</span><span class="p">,</span> <span class="n">level</span><span class="o">=</span><span class="n">L</span><span class="p">,</span> <span class="n">mode</span><span class="o">=</span><span class="n">mode</span><span class="p">)</span>
+            <span class="n">wv_coeff_approx</span> <span class="o">=</span> <span class="n">coeffs</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">wv_coeff_details</span> <span class="o">=</span> <span class="n">coeffs</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+
+            <span class="n">levels</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+            <span class="k">for</span> <span class="n">idx</span><span class="p">,</span> <span class="n">c</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">wv_coeff_details</span><span class="p">):</span>
+                <span class="n">j</span> <span class="o">=</span> <span class="n">L</span> <span class="o">-</span> <span class="n">idx</span>
+                <span class="n">levels</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;D</span><span class="si">{</span><span class="n">j</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))</span>
+            <span class="n">levels</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;A</span><span class="si">{</span><span class="n">L</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">wv_coeff_approx</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">)</span> <span class="o">**</span> <span class="mi">2</span><span class="p">))</span>
+
+            <span class="n">band_energy</span> <span class="o">=</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="mf">0.0</span> <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">}</span>
+            <span class="k">for</span> <span class="n">sub_name</span><span class="p">,</span> <span class="n">energy_sub</span> <span class="ow">in</span> <span class="n">levels</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">f_lo</span><span class="p">,</span> <span class="n">f_hi</span> <span class="o">=</span> <span class="n">sub_ranges</span><span class="p">[</span><span class="n">sub_name</span><span class="p">]</span>
+                <span class="n">width</span> <span class="o">=</span> <span class="p">(</span><span class="n">f_hi</span> <span class="o">-</span> <span class="n">f_lo</span><span class="p">)</span> <span class="ow">or</span> <span class="mf">1.0</span>
+                <span class="k">if</span> <span class="n">width</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="k">continue</span>
+                <span class="k">for</span> <span class="n">band_name</span><span class="p">,</span> <span class="p">(</span><span class="n">band_lo</span><span class="p">,</span> <span class="n">band_hi</span><span class="p">)</span> <span class="ow">in</span> <span class="n">bands</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                    <span class="n">olap</span> <span class="o">=</span> <span class="n">_overlap</span><span class="p">((</span><span class="n">f_lo</span><span class="p">,</span> <span class="n">f_hi</span><span class="p">),</span> <span class="p">(</span><span class="n">band_lo</span><span class="p">,</span> <span class="n">band_hi</span><span class="p">))</span>
+                    <span class="k">if</span> <span class="n">olap</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                        <span class="n">band_energy</span><span class="p">[</span><span class="n">band_name</span><span class="p">]</span> <span class="o">+=</span> <span class="n">energy_sub</span> <span class="o">*</span> <span class="p">(</span><span class="n">olap</span> <span class="o">/</span> <span class="n">width</span><span class="p">)</span>
+
+            <span class="k">for</span> <span class="n">band_name</span><span class="p">,</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">band_energy</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+                <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">band_name</span><span class="si">}</span><span class="s2">_wenergy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">cols</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="wavelet_entropy">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.wavelet_entropy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">wavelet_entropy</span><span class="p">(</span>
+    <span class="n">wv_band_energy_df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]],</span>
+    <span class="n">normalize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-300</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute (optionally normalized) Shannon entropy of wavelet band-energy distributions per channel.</span>
+
+<span class="sd">    Expects columns ``{channel}_{band}_wenergy`` where each row is a windowed wavelet band energy.</span>
+<span class="sd">    For each window and channel, treats the vector of ``_wenergy`` values across</span>
+<span class="sd">    ``bands`` as a distribution, then computes ``-Σplogp``.</span>
+<span class="sd">    Optionally normalizes by ``log(K)`` where ``K = len(bands)``.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    wv_band_energy_df : pandas.DataFrame</span>
+<span class="sd">        Output of :func:`wavelet_band_energy`; columns like ``{ch}_{band}_wenergy``.</span>
+<span class="sd">    bands : dict[str, tuple[float, float]]</span>
+<span class="sd">        Same band dictionary used for energy computation (order defines component order).</span>
+<span class="sd">    normalize : bool, default=True</span>
+<span class="sd">        If True, divide entropy by ``log(K)`` to obtain values in ``[0, 1]``.</span>
+<span class="sd">    eps : float, default=1e-300</span>
+<span class="sd">        Numerical guard for zero energies.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window, columns ``{ch}_wentropy``.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If no matching ``{channel}_{band}_wenergy`` columns are found.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">wv_band_energy_df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">number</span><span class="p">])</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+    <span class="n">band_list</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">bands</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+    <span class="n">K</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">band_list</span><span class="p">)</span>
+    <span class="n">norm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">K</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="n">normalize</span> <span class="ow">and</span> <span class="n">K</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="k">else</span> <span class="mf">1.0</span>
+
+    <span class="n">channel_to_cols</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">col</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_wenergy&quot;</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">core</span> <span class="o">=</span> <span class="n">col</span><span class="p">[:</span><span class="o">-</span><span class="mi">8</span><span class="p">]</span>
+        <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">core</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ch</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">core</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">:</span>
+            <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">ch</span><span class="p">,</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">K</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">channel_to_cols</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;No columns with pattern &#39;</span><span class="si">{channel}</span><span class="s2">_</span><span class="si">{band}</span><span class="s2">_wenergy&#39; matching provided bands.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">col</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;_wenergy&quot;</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">core</span> <span class="o">=</span> <span class="n">col</span><span class="p">[:</span><span class="o">-</span><span class="mi">8</span><span class="p">]</span>
+        <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">core</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ch</span><span class="p">,</span> <span class="n">b</span> <span class="o">=</span> <span class="n">core</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">channel_to_cols</span> <span class="ow">and</span> <span class="n">b</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">:</span>
+            <span class="n">idx</span> <span class="o">=</span> <span class="n">band_list</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">b</span><span class="p">)</span>
+            <span class="n">channel_to_cols</span><span class="p">[</span><span class="n">ch</span><span class="p">][</span><span class="n">idx</span><span class="p">]</span> <span class="o">=</span> <span class="n">col</span>
+
+    <span class="n">out_cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_wentropy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">keys</span><span class="p">()]</span>
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)):</span>
+        <span class="n">row_out</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">ch</span><span class="p">,</span> <span class="n">cols_in_order</span> <span class="ow">in</span> <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">vals</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols_in_order</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">c</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="n">vals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">v</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iat</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="o">.</span><span class="n">get_loc</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span>
+                    <span class="n">vals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">)</span>
+
+            <span class="n">total</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">vals</span><span class="p">))</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="n">total</span> <span class="k">if</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">total</span><span class="p">)</span> <span class="ow">and</span> <span class="n">total</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="k">else</span> <span class="n">eps</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">vals</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span> <span class="o">/</span> <span class="n">total</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">eps</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+            <span class="n">p</span> <span class="o">/=</span> <span class="n">p</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+            <span class="n">H</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
+            <span class="n">row_out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_wentropy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">H</span> <span class="o">/</span> <span class="p">(</span><span class="n">norm</span> <span class="ow">or</span> <span class="mf">1.0</span><span class="p">))</span>
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row_out</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">out_cols</span><span class="p">)</span></div>
+
+
+
+<span class="sd">&quot;&quot;&quot;IMF FEATURES&quot;&quot;&quot;</span>
+
+
+<div class="viewcode-block" id="imf_band_energy">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.imf_band_energy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">imf_band_energy</span><span class="p">(</span>
+    <span class="n">df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">fs</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="n">imf_to_band</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;gamma&quot;</span><span class="p">,</span> <span class="s2">&quot;betaH&quot;</span><span class="p">,</span> <span class="s2">&quot;betaL&quot;</span><span class="p">,</span> <span class="s2">&quot;alpha&quot;</span><span class="p">,</span> <span class="s2">&quot;theta&quot;</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">],</span>
+    <span class="n">window_sec</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">4.0</span><span class="p">,</span>
+    <span class="n">overlap</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.5</span><span class="p">,</span>
+    <span class="n">EMD_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="p">{},</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute Intrinsic Mode Function (IMF) band-energy distributions per channel using</span>
+<span class="sd">    Empirical Mode Decomposition (EMD).</span>
+
+<span class="sd">    Expects columns named ``{channel}`` where each row is a reading of raw EEG data.</span>
+<span class="sd">    For each column, applies EMD decomposition to find mean m(t) of envelopes (cubic splines</span>
+<span class="sd">    fit to extremas) and takes difference between raw data point and m(t) [d(t) = x(t) - m(t)].</span>
+<span class="sd">    For each window and channel, the IMF band-energy is based on the cumulative sums of the IMFs</span>
+<span class="sd">    returned by the EMD function.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    df : pandas.DataFrame</span>
+<span class="sd">        Raw data EEG dataframe. Numeric columns.</span>
+<span class="sd">    fs : float</span>
+<span class="sd">        Sampling rate in Hz (used only for window sizing).</span>
+<span class="sd">    imf_to_band : list[str], default=[&quot;gamma&quot;, &quot;betaH&quot;, &quot;betaL&quot;, &quot;alpha&quot;, &quot;theta&quot;, &quot;delta&quot;]</span>
+<span class="sd">        Labels to assign to IMFs 1..K (K = number of labels).</span>
+<span class="sd">    window_sec : float, default=4.0</span>
+<span class="sd">        Window length in seconds.</span>
+<span class="sd">    overlap : float, default=0.5</span>
+<span class="sd">        Fractional overlap in ``[0, 1)``.</span>
+<span class="sd">    EMD_kwargs : dict, default={}</span>
+<span class="sd">        Extra keyword arguments passed to ``PyEMD.EMD`` (e.g., ``max_imf`` is internally set).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window; columns: ``{channel}_{band}_imfenergy`` for each band label.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If window too small, overlap invalid, or window longer than available samples.</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    - IMF indices are assigned in order to the names in ``imf_to_band``; if fewer IMFs</span>
+<span class="sd">      are present than labels, missing energies are filled with 0.0.</span>
+<span class="sd">    - The EMD is computed once per full signal and reused for all windows via cumulative sums.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">number</span><span class="p">])</span>
+
+    <span class="n">n_samples</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)</span>
+    <span class="n">nperseg</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">window_sec</span> <span class="o">*</span> <span class="n">fs</span><span class="p">))</span>
+
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;window_sec too small for given fs; increase window_sec.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="mf">0.0</span> <span class="o">&lt;=</span> <span class="n">overlap</span> <span class="o">&lt;</span> <span class="mf">1.0</span><span class="p">):</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap must be in [0.0, 1.0).&quot;</span><span class="p">)</span>
+    <span class="n">hop</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">round</span><span class="p">(</span><span class="n">nperseg</span> <span class="o">*</span> <span class="p">(</span><span class="mf">1.0</span> <span class="o">-</span> <span class="n">overlap</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="n">hop</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;overlap too large; hop size must be &gt;= 1 sample.&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">nperseg</span> <span class="o">&gt;</span> <span class="n">n_samples</span><span class="p">:</span>
+        <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">band</span><span class="si">}</span><span class="s2">_imfenergy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">for</span> <span class="n">band</span> <span class="ow">in</span> <span class="n">imf_to_band</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">columns</span><span class="o">=</span><span class="n">cols</span><span class="p">)</span>
+
+    <span class="n">max_imf_needed</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">imf_to_band</span><span class="p">))</span>
+    <span class="n">cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">band</span><span class="si">}</span><span class="s2">_imfenergy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">for</span> <span class="n">band</span> <span class="ow">in</span> <span class="n">imf_to_band</span><span class="p">]</span>
+
+    <span class="n">emd</span> <span class="o">=</span> <span class="n">EMD</span><span class="p">(</span><span class="o">**</span><span class="p">(</span><span class="n">EMD_kwargs</span><span class="p">))</span>
+
+    <span class="n">rows</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="n">emd</span><span class="o">.</span><span class="n">_imf_cumsums</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="n">y_full</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">ch</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="nb">float</span><span class="p">,</span> <span class="n">copy</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+        <span class="n">imfs_full</span> <span class="o">=</span> <span class="n">emd</span><span class="o">.</span><span class="n">emd</span><span class="p">(</span><span class="n">y_full</span><span class="p">,</span> <span class="n">max_imf</span><span class="o">=</span><span class="n">max_imf_needed</span><span class="p">)</span>
+        <span class="n">sq</span> <span class="o">=</span> <span class="n">imfs_full</span><span class="o">**</span><span class="mi">2</span>
+        <span class="n">cum_sq</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">hstack</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">sq</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">sq</span><span class="o">.</span><span class="n">dtype</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">cumsum</span><span class="p">(</span><span class="n">sq</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+        <span class="p">)</span>
+
+        <span class="n">emd</span><span class="o">.</span><span class="n">_imf_cumsums</span><span class="p">[</span><span class="n">ch</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="n">imfs_full</span><span class="p">,</span> <span class="n">cum_sq</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">start</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">n_samples</span> <span class="o">-</span> <span class="n">nperseg</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">hop</span><span class="p">):</span>
+        <span class="n">end</span> <span class="o">=</span> <span class="n">start</span> <span class="o">+</span> <span class="n">nperseg</span>
+        <span class="n">row</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+            <span class="n">e_win</span> <span class="o">=</span> <span class="n">emd</span><span class="o">.</span><span class="n">_imf_cumsums</span><span class="p">[</span><span class="n">ch</span><span class="p">][</span><span class="mi">1</span><span class="p">][:,</span> <span class="n">end</span><span class="p">]</span> <span class="o">-</span> <span class="n">emd</span><span class="o">.</span><span class="n">_imf_cumsums</span><span class="p">[</span><span class="n">ch</span><span class="p">][</span><span class="mi">1</span><span class="p">][:,</span> <span class="n">start</span><span class="p">]</span>
+
+            <span class="k">for</span> <span class="n">imf_idx</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">imf_to_band</span><span class="p">)):</span>
+                <span class="n">e</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">e_win</span><span class="p">[</span><span class="n">imf_idx</span><span class="p">])</span> <span class="k">if</span> <span class="n">imf_idx</span> <span class="o">&lt;</span> <span class="n">e_win</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="k">else</span> <span class="mf">0.0</span>
+                <span class="n">row</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">imf_to_band</span><span class="p">[</span><span class="n">imf_idx</span><span class="p">]</span><span class="si">}</span><span class="s2">_imfenergy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span>
+
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">cols</span><span class="p">)</span></div>
+
+
+
+<div class="viewcode-block" id="imf_entropy">
+<a class="viewcode-back" href="../../api/eegproc.featurization.html#eegproc.imf_entropy">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">imf_entropy</span><span class="p">(</span>
+    <span class="n">imf_energy_df</span><span class="p">:</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">,</span>
+    <span class="n">bands</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;gamma&quot;</span><span class="p">,</span> <span class="s2">&quot;betaH&quot;</span><span class="p">,</span> <span class="s2">&quot;betaL&quot;</span><span class="p">,</span> <span class="s2">&quot;alpha&quot;</span><span class="p">,</span> <span class="s2">&quot;theta&quot;</span><span class="p">,</span> <span class="s2">&quot;delta&quot;</span><span class="p">],</span>
+    <span class="n">normalize</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-300</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compute (normalized) Shannon entropy of IMF energy distributions per channel.</span>
+
+<span class="sd">    For each window and channel, uses the vector of ``_imfenergy`` values across</span>
+<span class="sd">    ``bands`` as a distribution and computes ``-Σplogp``. Optionally normalizes</span>
+<span class="sd">    by ``log(K)`` where ``K = len(bands)``.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    imf_energy_df : pandas.DataFrame</span>
+<span class="sd">        Output from :func:`imf_band_energy` with columns ``{ch}_{band}_imfenergy``.</span>
+<span class="sd">    bands : list[str], default=[&quot;gamma&quot;, &quot;betaH&quot;, &quot;betaL&quot;, &quot;alpha&quot;, &quot;theta&quot;, &quot;delta&quot;]</span>
+<span class="sd">        Band labels (order defines component order).</span>
+<span class="sd">    normalize : bool, default=True</span>
+<span class="sd">        If True, divide entropy by ``log(K)`` to obtain values in ``[0, 1]``.</span>
+<span class="sd">    eps : float, default=1e-300</span>
+<span class="sd">        Numerical guard for zero energies.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    pandas.DataFrame</span>
+<span class="sd">        One row per window; columns ``{ch}_imfentropy``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">df</span> <span class="o">=</span> <span class="n">imf_energy_df</span><span class="o">.</span><span class="n">select_dtypes</span><span class="p">(</span><span class="n">include</span><span class="o">=</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">number</span><span class="p">])</span>
+
+    <span class="n">k</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">bands</span><span class="p">)</span>
+    <span class="n">norm</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">k</span><span class="p">)</span> <span class="k">if</span> <span class="p">(</span><span class="n">normalize</span> <span class="ow">and</span> <span class="n">k</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="k">else</span> <span class="mf">1.0</span>
+
+    <span class="n">channel_to_cols</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">suffix</span> <span class="o">=</span> <span class="s2">&quot;_imfenergy&quot;</span>
+
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">col</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">suffix</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">ch_band</span> <span class="o">=</span> <span class="n">col</span><span class="p">[:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">suffix</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ch_band</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ch</span><span class="p">,</span> <span class="n">band</span> <span class="o">=</span> <span class="n">ch_band</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">band</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">:</span>
+            <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">setdefault</span><span class="p">(</span><span class="n">ch</span><span class="p">,</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="n">k</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">col</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">col</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="n">suffix</span><span class="p">):</span>
+            <span class="k">continue</span>
+        <span class="n">core</span> <span class="o">=</span> <span class="n">col</span><span class="p">[:</span> <span class="o">-</span><span class="nb">len</span><span class="p">(</span><span class="n">suffix</span><span class="p">)]</span>
+        <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">core</span><span class="p">:</span>
+            <span class="k">continue</span>
+        <span class="n">ch</span><span class="p">,</span> <span class="n">band</span> <span class="o">=</span> <span class="n">core</span><span class="o">.</span><span class="n">rsplit</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">channel_to_cols</span> <span class="ow">and</span> <span class="n">band</span> <span class="ow">in</span> <span class="n">bands</span><span class="p">:</span>
+            <span class="n">channel_to_cols</span><span class="p">[</span><span class="n">ch</span><span class="p">][</span><span class="n">bands</span><span class="o">.</span><span class="n">index</span><span class="p">(</span><span class="n">band</span><span class="p">)]</span> <span class="o">=</span> <span class="n">col</span>
+
+    <span class="n">out_cols</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_imfentropy&quot;</span> <span class="k">for</span> <span class="n">ch</span> <span class="ow">in</span> <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">keys</span><span class="p">()]</span>
+    <span class="n">rows</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">df</span><span class="p">)):</span>
+        <span class="n">row_out</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">ch</span><span class="p">,</span> <span class="n">cols_in_order</span> <span class="ow">in</span> <span class="n">channel_to_cols</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">vals</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">cols_in_order</span><span class="p">:</span>
+                <span class="n">v</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iat</span><span class="p">[</span><span class="n">i</span><span class="p">,</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="o">.</span><span class="n">get_loc</span><span class="p">(</span><span class="n">c</span><span class="p">)]</span>
+                <span class="n">vals</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">)</span>
+
+            <span class="n">total</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nansum</span><span class="p">(</span><span class="n">vals</span><span class="p">))</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">isfinite</span><span class="p">(</span><span class="n">total</span><span class="p">)</span> <span class="ow">and</span> <span class="n">total</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">):</span>
+                <span class="n">row_out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_imfentropy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">nan</span>
+                <span class="k">continue</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">vals</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span> <span class="o">/</span> <span class="n">total</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">eps</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+            <span class="n">p</span> <span class="o">/=</span> <span class="n">p</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+            <span class="n">H</span> <span class="o">=</span> <span class="o">-</span><span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">p</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
+            <span class="n">row_out</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ch</span><span class="si">}</span><span class="s2">_imfentropy&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">H</span> <span class="o">/</span> <span class="p">(</span><span class="n">norm</span> <span class="ow">or</span> <span class="mf">1.0</span><span class="p">))</span>
+
+        <span class="n">rows</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">row_out</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pd</span><span class="o">.</span><span class="n">DataFrame</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span> <span class="n">columns</span><span class="o">=</span><span class="n">out_cols</span><span class="p">)</span></div>
+
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">FS</span> <span class="o">=</span> <span class="mi">128</span>
+    <span class="n">csv_path</span> <span class="o">=</span> <span class="s2">&quot;DREAMER.csv&quot;</span>
+    <span class="n">chunk_iter</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">csv_path</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">first_chunk</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span><span class="n">chunk_iter</span><span class="p">)</span>
+
+    <span class="n">dreamer_df</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="n">csv_path</span><span class="p">,</span> <span class="n">chunksize</span><span class="o">=</span><span class="mi">10000</span><span class="p">):</span>
+        <span class="n">dreamer_df</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chunk</span><span class="p">)</span>
+
+    <span class="n">dreamer_df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">concat</span><span class="p">(</span><span class="n">dreamer_df</span><span class="p">,</span> <span class="n">ignore_index</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">patient_id</span> <span class="ow">in</span> <span class="n">dreamer_df</span><span class="p">[</span><span class="s2">&quot;patient_index&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">():</span>
+        <span class="k">for</span> <span class="n">video_id</span> <span class="ow">in</span> <span class="n">dreamer_df</span><span class="p">[</span><span class="s2">&quot;video_index&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">unique</span><span class="p">():</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="p">(</span><span class="n">dreamer_df</span><span class="p">[</span><span class="s2">&quot;patient_index&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">patient_id</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span>
+                <span class="n">dreamer_df</span><span class="p">[</span><span class="s2">&quot;video_index&quot;</span><span class="p">]</span> <span class="o">==</span> <span class="n">video_id</span>
+            <span class="p">)</span>
+            <span class="n">eeg_df</span> <span class="o">=</span> <span class="n">dreamer_df</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="n">mask</span><span class="p">,</span> <span class="p">:]</span>
+            <span class="k">del</span> <span class="n">eeg_df</span><span class="p">[</span><span class="s2">&quot;patient_index&quot;</span><span class="p">]</span>
+            <span class="k">del</span> <span class="n">eeg_df</span><span class="p">[</span><span class="s2">&quot;video_index&quot;</span><span class="p">]</span>
+
+            <span class="c1"># clean = bandpass_filter(</span>
+            <span class="c1">#     eeg_df, FS, bands=FREQUENCY_BANDS, low=0.5, high=45.0, notch_hz=60</span>
+            <span class="c1"># )</span>
+            <span class="c1"># hj = hjorth_params(clean, FS)</span>
+            <span class="c1"># psd_df = psd_bandpowers(clean, FS, bands=FREQUENCY_BANDS)</span>
+            <span class="c1"># shannons_df = shannons_entropy(clean, FS, bands=FREQUENCY_BANDS)</span>
+            <span class="c1"># wt_df = wavelet_band_energy(eeg_df, FS, bands=FREQUENCY_BANDS)</span>
+            <span class="c1"># print(&quot;Energy&quot;, wt_df)</span>
+            <span class="c1"># wt_df = wavelet_entropy(wt_df, bands=FREQUENCY_BANDS)</span>
+            <span class="c1"># print(&quot;Entropy&quot;, wt_df)</span>
+
+            <span class="n">imf_df</span> <span class="o">=</span> <span class="n">imf_band_energy</span><span class="p">(</span><span class="n">eeg_df</span><span class="p">,</span> <span class="n">FS</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">imf_df</span><span class="p">)</span>
+            <span class="n">imf_df</span> <span class="o">=</span> <span class="n">imf_entropy</span><span class="p">(</span><span class="n">imf_df</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">imf_df</span><span class="p">)</span>
+            <span class="n">exit</span><span class="p">()</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2025, Vitor Inserra.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
