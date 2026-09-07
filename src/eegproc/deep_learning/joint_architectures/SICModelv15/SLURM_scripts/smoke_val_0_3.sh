@@ -138,7 +138,7 @@ print(json.dumps({
 
     "mldg_meta_train_subjects": {"grid": [8, 12]},
     "mldg_meta_test_subjects": {"grid": [4, 6]},
-    "mldg_trials_per_subject": {"grid": [3, 4]},
+    "mldg_trials_per_subject": 4,
     "mldg_steps_per_epoch": 20,
     "mldg_inner_learning_rate": 1e-4,
     "mldg_meta_test_weight": 1.0,
@@ -176,14 +176,14 @@ print(json.dumps({
 
     "use_subject_adversarial": True,
     "subject_adversarial_weight": 0.6,
-    "subject_loss_weight": 0.2,
+    "subject_loss_weight": {"grid": [0.2, 0.3]},
     "subject_hidden_units": 64,
     "subject_dropout": 0.0,
 
     "use_gcn_gru_branch": True,
     "use_bilstm_branch": True,
     "use_decoder": True,
-    "reconstruction_loss_weight": 0.4,
+    "reconstruction_loss_weight": {"grid": [0.4, 0.6]},
     "decoder_dropout": 0.1,
     "joint_reconstruction_auxiliary_weight": 0.25,
     "joint_reconstruction_initial_alpha": 0.5,
