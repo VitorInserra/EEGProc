@@ -62,6 +62,7 @@ class SICTrainingConfig:
     source_use_class_weight: bool = False
     calibration_use_class_weight: bool = False
     n_jobs: int = 1
+    gpus_per_fold: int = 1
     gpu_ids: tuple[int, ...] | None = None
     cpus_per_worker: int | None = None
     max_subjects: int | None = None
@@ -376,6 +377,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--calibration-use-class-weight", action="store_true")
 
     parser.add_argument("--n-jobs", type=_positive_int, default=1)
+    parser.add_argument(
+        "--gpus-per-fold", type=_positive_int, default=1,
+        help="GPUs per MLDG source fold; --n-jobs counts folds and --gpu-ids lists all assigned GPUs.",
+    )
     parser.add_argument("--gpu-ids", type=int, nargs="+", default=None)
     parser.add_argument("--cpus-per-worker", type=_positive_int, default=None)
     parser.add_argument(
@@ -520,6 +525,11 @@ def validate_args(args, model_config: dict) -> None:
     for index, configuration in enumerate(configurations, start=1):
         builder_config, _ = split_data_hyperparameters(configuration)
         training_method = configuration_training_method(builder_config)
+        if args.gpus_per_fold > 1:
+            if training_method != "mldg" or args.classification_level != "trial":
+                raise ValueError("--gpus-per-fold > 1 requires trial-level MLDG.")
+            if builder_config.get("gcn_use_batch_norm", False):
+                raise ValueError("Multi-GPU MLDG requires gcn_use_batch_norm=false.")
         if (
             builder_config.get("use_gcn_gru_branch") is False
             and builder_config.get("use_bilstm_branch") is False
@@ -702,6 +712,7 @@ def training_config_from_args(
         source_use_class_weight=args.source_use_class_weight,
         calibration_use_class_weight=args.calibration_use_class_weight,
         n_jobs=args.n_jobs,
+        gpus_per_fold=args.gpus_per_fold,
         gpu_ids=None if args.gpu_ids is None else tuple(args.gpu_ids),
         cpus_per_worker=args.cpus_per_worker,
         max_subjects=args.max_subjects,
