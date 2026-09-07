@@ -7,16 +7,15 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=09:00:00
+#SBATCH --time=18:00:00
 
 set -euo pipefail
 
-# Run SICModelv15 on every DREAMER valence LOSO target. The base model
-# hyperparameters reproduce rank 1 from:
-# runs/full/sic_trial_bigru_v11_mldg_brier_ablation/DREAMER/valence/
-# suite_65452590/full/
-# dreamer_valence_sic_trial_bigru_v11_mldg_full_full_20260827_213158/
-# hyperparameter_search_summary.csv
+# Run SICModelv15 on every DREAMER valence LOSO target using configurations
+# 1 and 2 from v15 job 81133: subject-loss weight 0.2 and reconstruction
+# weights 0.4/0.6. All listed model settings match those runs except the
+# requested increase from 3 to 4 trials per subject.
+# Two complete configurations double the previous nine-hour job budget.
 #
 # SICModelv15 adds the learned convex joint reconstruction. Its v15 defaults
 # are made explicit below: initial alpha=0.5 and auxiliary branch weight=0.25.
@@ -35,7 +34,7 @@ EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
 LABELS_PATH="${LABELS_PATH:-$PROJECT_DIR/datasets/dreamer_labels.npy}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 
-# These reproduce the training budget used by the winning v11 run.
+# Match the 4 source / 10 calibration epochs used by v15 job 81133.
 SOURCE_EPOCHS="${SOURCE_EPOCHS:-4}"
 CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-10}"
 SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
@@ -126,10 +125,9 @@ if [[ -n "$MODULE_CUDA_ROOT" ]]; then
     export CUDA_PATH="$MODULE_CUDA_ROOT"
 fi
 
-# One fixed configuration: the rank-1 v11 hyperparameters with subject-loss
-# weight 1.0, reconstruction weight 0.1, and the explicit SICModelv15 joint-
-# reconstruction settings. Fixed wrappers keep layer-width lists as one
-# architecture rather than a search grid.
+# Two configurations reproduce the v15 job 81133 loss weights: fixed subject
+# loss 0.2 and reconstruction weights 0.4/0.6. Fixed wrappers keep layer-width
+# lists as one architecture; only reconstruction weight varies in this grid.
 MODEL_CONFIG="$(python - <<'PY'
 import json
 
@@ -186,7 +184,7 @@ print(json.dumps({
     "use_gcn_gru_branch": True,
     "use_bilstm_branch": True,
     "use_decoder": True,
-    "reconstruction_loss_weight": 0.4,
+    "reconstruction_loss_weight": {"grid": [0.4, 0.6]},
     "decoder_dropout": 0.1,
     "joint_reconstruction_auxiliary_weight": 0.25,
     "joint_reconstruction_initial_alpha": 0.5,
@@ -211,9 +209,9 @@ echo "Training: MLDG, $SOURCE_EPOCHS source epochs"
 echo "Parallelism: 2 folds x 2 GPUs; episode trials: 32 meta-train / 16 meta-test"
 echo "Per GPU: 16 meta-train / 8 meta-test trials; full-episode VC statistics"
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
-echo "Subject loss weight: 1.0"
-echo "Joint reconstruction: weight=0.1 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configuration source: rank 1 from v11 suite 65452590"
+echo "Subject loss weight: 0.2"
+echo "Joint reconstruction: weights=0.4,0.6 initial alpha=0.5 auxiliary branch weight=0.25"
+echo "Configuration source: v15 job 81133 configurations 1 and 2; 4 trials/subject"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 python --version
 nvidia-smi

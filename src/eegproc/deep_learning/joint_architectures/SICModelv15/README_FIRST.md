@@ -132,10 +132,16 @@ sbatch src/eegproc/deep_learning/joint_architectures/SICModelv15/SLURM_scripts/f
 Each job reserves **four GPUs**, runs **two folds concurrently with two GPUs
 per fold**, and covers all 23 LOSO targets using all other 22 subjects as the
 source pool. Submitting both jobs can therefore use eight GPUs in total.
-Each job retains its existing 8 CPUs, 128 GB RAM, nine-hour limit, 4 source
+Each job retains its existing 8 CPUs, 128 GB RAM, 4 source
 epochs with 20 MLDG steps per epoch, 10 calibration epochs, calibration shots
-3/6/9/12, reconstruction weight 0.1, and subject-loss weight 1.0. The model architecture,
-losses, and distinct, class-balanced trial sampling rules are unchanged.
+3/6/9/12, and now tests **reconstruction weights 0.4 and 0.6** with a fixed
+**subject-loss weight of 0.2**. These are configurations 1 and 2 from the
+recent v15 valence job 81133. The time limit is doubled to 18 hours to budget
+for both complete configurations. Each configuration runs all 23 targets:
+46 source fits per job, with independent calibration at every shot level.
+The existing selection rule remains 12-shot calibrated Brier score; results
+for both configurations are saved. The model architecture and distinct,
+class-balanced trial sampling rules are unchanged.
 
 | Target | Meta-train / meta-test subjects | Trials per subject | Global trials, train / test | Trials per GPU, train / test |
 | --- | --- | --- | --- | --- |
