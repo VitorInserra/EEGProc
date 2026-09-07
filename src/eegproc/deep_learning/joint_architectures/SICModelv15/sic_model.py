@@ -1200,6 +1200,10 @@ class SICModel(tf.keras.Model):
                 **kwargs,
             )
 
+        if len(getattr(self, "_fold_devices", ())) > 1:
+            from .multi_gpu import FoldGPUMemory
+
+            callbacks = list(callbacks or ()) + [FoldGPUMemory(self._fold_devices)]
         return fit_sic_mldg(
             self,
             x=x,
@@ -1723,6 +1727,10 @@ class SICModel(tf.keras.Model):
         reconstruction objective is a normalized blend of joint MSE and mean
         branch MSE, preserving the scale of ``reconstruction_loss_weight``.
         """
+        if "device_shards" in outputs:
+            from .multi_gpu import reconstruction_on_devices
+
+            return reconstruction_on_devices(self, outputs, training=training)
         dtype = outputs["combined_feature_sequence"].dtype
         zero = tf.zeros((), dtype=dtype)
         components = {
@@ -2204,8 +2212,29 @@ class SICModel(tf.keras.Model):
             vrex_components=vrex_components,
         )
 
+    def configure_fold_devices(self, devices):
+        """Place MLDG trial forwards on a fold's isolated GPU group.
+
+        Device placement is runtime-only: checkpoints remain ordinary v15
+        models, and calibration/inference retain their existing execution.
+        """
+        from .multi_gpu import validate_fold_devices
+
+        self._fold_devices = validate_fold_devices(self, devices)
+        self.train_function = None
+
+    def _encode_mldg(self, eeg_inputs, *, training):
+        devices = getattr(self, "_fold_devices", ())
+        if len(devices) < 2:
+            return self._encode(eeg_inputs, training=training)
+        from .multi_gpu import encode_on_devices
+
+        return encode_on_devices(self, eeg_inputs, devices, training=training)
+
     def _mldg_train_step(self, x, y_flat, sample_weight):
-        run_sic_mldg_train_step(self, x, y_flat, sample_weight)
+        run_sic_mldg_train_step(
+            self, x, y_flat, sample_weight, encode=self._encode_mldg
+        )
 
     def _calibration_train_step(self, x, y_flat, sample_weight):
         eeg_inputs, _ = self._split_eeg_and_subject_inputs(x)

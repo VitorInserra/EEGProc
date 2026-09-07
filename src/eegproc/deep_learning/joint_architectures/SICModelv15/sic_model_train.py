@@ -964,6 +964,7 @@ def _run_subject_calibration_configuration(
         verbose=config.verbose,
         n_jobs=config.n_jobs,
         gpu_ids=config.gpu_ids,
+        gpus_per_fold=config.gpus_per_fold,
         cpus_per_worker=config.cpus_per_worker,
         max_subjects=config.max_subjects,
         target_subjects=config.target_subjects,

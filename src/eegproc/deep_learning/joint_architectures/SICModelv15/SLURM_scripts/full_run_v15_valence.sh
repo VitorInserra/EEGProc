@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sicv15_aro_full
-#SBATCH --output=sicv15_aro_full_%j.out
-#SBATCH --error=sicv15_aro_full_%j.err
+#SBATCH --job-name=full_run_v15_valence
+#SBATCH --output=full_run_v15_valence_%j.out
+#SBATCH --error=full_run_v15_valence_%j.err
 #SBATCH --partition=l40-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --gres=gpu:4
@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-# Run SICModelv15 on every DREAMER arousal LOSO target. The base model
+# Run SICModelv15 on every DREAMER valence LOSO target. The base model
 # hyperparameters reproduce rank 1 from:
 # runs/full/sic_trial_bigru_v11_mldg_brier_ablation/DREAMER/valence/
 # suite_65452590/full/
@@ -20,9 +20,9 @@ set -euo pipefail
 #
 # SICModelv15 adds the learned convex joint reconstruction. Its v15 defaults
 # are made explicit below: initial alpha=0.5 and auxiliary branch weight=0.25.
-# DREAMER arousal includes subjects with only one low-arousal trial. Use two
-# trials per selected subject so every balanced draw is feasible, and expand
-# each episode from 12 to 18 subjects to preserve 36 total trials per update.
+# Four allocated GPUs run two folds concurrently on pairs (0,1) and (2,3).
+# Each episode uses 8 meta-train + 4 meta-test subjects x 4 distinct trials:
+# 32/16 trials globally, 16/8 per GPU, matching smoke_val_0_3.
 
 module purge
 module load python/3.12.4
@@ -139,9 +139,9 @@ print(json.dumps({
     "weight_decay": 5e-5,
     "vrex_penalty_weight": 1.0,
 
-    "mldg_meta_train_subjects": 12,
-    "mldg_meta_test_subjects": 6,
-    "mldg_trials_per_subject": 2,
+    "mldg_meta_train_subjects": 8,
+    "mldg_meta_test_subjects": 4,
+    "mldg_trials_per_subject": 4,
     "mldg_steps_per_epoch": 20,
     "mldg_inner_learning_rate": 1e-4,
     "mldg_meta_test_weight": 1.0,
@@ -205,9 +205,11 @@ PY
 echo "SIC builder: v15"
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Node: $(hostname)"
-echo "Dataset/target: DREAMER arousal"
+echo "Dataset/target: DREAMER valence"
 echo "Scope: all 23 LOSO target subjects"
-echo "Training: MLDG, $SOURCE_EPOCHS source epochs, 12+6 subjects x 2 trials = 36 trials/episode"
+echo "Training: MLDG, $SOURCE_EPOCHS source epochs"
+echo "Parallelism: 2 folds x 2 GPUs; episode trials: 32 meta-train / 16 meta-test"
+echo "Per GPU: 16 meta-train / 8 meta-test trials; full-episode VC statistics"
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
 echo "Subject loss weight: 1.0"
 echo "Joint reconstruction: weight=0.1 initial alpha=0.5 auxiliary branch weight=0.25"
@@ -216,17 +218,26 @@ echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 python --version
 nvidia-smi
 
+# Verify the allocation and the two-GPU training path before the full run.
+python - <<'PY_GPU'
+import tensorflow as tf
+n = len(tf.config.list_physical_devices("GPU"))
+if n != 4:
+    raise SystemExit(f"This full run requires exactly 4 allocated GPUs; visible={n}")
+PY_GPU
+EEGPROC_TEST_GPUS=1 python -m src.tests.test_sic_v15_multi_gpu
+
 python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_train \
     --training-protocol loso_validation \
     --dataset dreamer \
     --raw-eeg-npy "$EEG_PATH" \
     --raw-labels-npy "$LABELS_PATH" \
-    --label-dimension arousal \
+    --label-dimension valence \
     --classification-level trial \
     --n-channels 14 \
     --n-bands 3 \
-    --out-dir "runs/full/sic_trial_bigru_v15_joint_best_v11/DREAMER/arousal/suite_${SUITE_ID}/full" \
-    --run-name "dreamer_arousal_sic_trial_bigru_v15_mldg_best_v11_full" \
+    --out-dir "runs/full/sic_trial_bigru_v15_joint_best_v11/DREAMER/valence/suite_${SUITE_ID}/full" \
+    --run-name "full_run_v15_valence" \
     --training-method mldg \
     --source-epochs "$SOURCE_EPOCHS" \
     --source-batch-size "$SOURCE_BATCH_SIZE" \
@@ -250,9 +261,10 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --prediction-diagnostics-threshold-tolerance 0.01 \
     --prediction-diagnostics-seed 42 \
     --ece-bins 15 \
-    --n-jobs 4 \
+    --n-jobs 2 \
+    --gpus-per-fold 2 \
     --gpu-ids 0 1 2 3 \
-    --cpus-per-worker 2 \
+    --cpus-per-worker 4 \
     --verbose 2 \
     --seed 42 \
     --label-threshold-mode global \

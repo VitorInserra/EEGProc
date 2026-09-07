@@ -439,8 +439,12 @@ def _gradient_cosine_similarity(left, right):
     return tf.math.divide_no_nan(dot, tf.sqrt(left_norm_sq * right_norm_sq))
 
 
-def run_sic_mldg_train_step(model, x, y_flat, sample_weight) -> None:
+def run_sic_mldg_train_step(model, x, y_flat, sample_weight, *, encode=None) -> None:
     """Execute SIC's first-order MLDG update outside the model definition."""
+    # v15 may place independent trial forwards on different devices. They
+    # still share one set of variables, one global objective, and this exact
+    # inner/outer update; older models keep their original forward path.
+    encode = model._encode if encode is None else encode
     if not isinstance(x, Mapping) or "mldg_role" not in x:
         raise ValueError(
             "MLDG train_step requires the episode roles produced by "
@@ -478,7 +482,7 @@ def run_sic_mldg_train_step(model, x, y_flat, sample_weight) -> None:
     # deliberately excludes reconstruction, so virtual-unseen performance
     # cannot improve merely by reproducing that subject's EEG.
     with tf.GradientTape() as meta_train_tape:
-        meta_train_outputs = model._encode(meta_train_eeg, training=True)
+        meta_train_outputs = encode(meta_train_eeg, training=True)
         meta_train_vc = model._vc_components(
             meta_train_outputs["classification_embedding"],
             meta_train_outputs["logits"],
@@ -522,7 +526,7 @@ def run_sic_mldg_train_step(model, x, y_flat, sample_weight) -> None:
             )
 
     with tf.GradientTape() as meta_test_tape:
-        meta_test_outputs = model._encode(meta_test_eeg, training=True)
+        meta_test_outputs = encode(meta_test_eeg, training=True)
         meta_test_vc = model._vc_components(
             meta_test_outputs["classification_embedding"],
             meta_test_outputs["logits"],

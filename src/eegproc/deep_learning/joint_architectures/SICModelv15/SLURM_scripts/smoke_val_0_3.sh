@@ -1,25 +1,23 @@
 #!/bin/bash
-#SBATCH --job-name=sicv15_val_full
-#SBATCH --output=sicv15_val_full_%j.out
-#SBATCH --error=sicv15_val_full_%j.err
+#SBATCH --job-name=smoke_val_0_3
+#SBATCH --output=smoke_val_0_3_%j.out
+#SBATCH --error=smoke_val_0_3_%j.err
 #SBATCH --partition=l40-gpu
 #SBATCH --qos=gpu_access
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=09:00:00
+#SBATCH --time=04:00:00
 
 set -euo pipefail
 
-# Run SICModelv15 on every DREAMER valence LOSO target. The base model
-# hyperparameters reproduce rank 1 from:
-# runs/full/sic_trial_bigru_v11_mldg_brier_ablation/DREAMER/valence/
-# suite_65452590/full/
-# dreamer_valence_sic_trial_bigru_v11_mldg_full_full_20260827_213158/
-# hyperparameter_search_summary.csv
-#
-# SICModelv15 adds the learned convex joint reconstruction. Its v15 defaults
-# are made explicit below: initial alpha=0.5 and auxiliary branch weight=0.25.
+# DREAMER valence targets 0, 1, 2, 3, with all other subjects available
+# for each LOSO source pool. Four allocated GPUs run two folds concurrently:
+# pair (0,1) and pair (2,3). The source episode uses 8 meta-train subjects,
+# 4 meta-test subjects, and 4 trials each: 32/16 globally, 16/8 per GPU.
+# Keep the existing 0-3 run's 6 source epochs, 20 MLDG steps/epoch, 10
+# calibration epochs, and reconstruction-weight grid (0.1, 0.4).
+# Run from the cluster checkout: sbatch <path-to-this-script>
 
 module purge
 module load python/3.12.4
@@ -30,15 +28,15 @@ PROJECT_DIR="${PROJECT_DIR:-$HOME/EEGProc}"
 VENV_DIR="${VENV_DIR:-$PROJECT_DIR/venv312}"
 EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
 LABELS_PATH="${LABELS_PATH:-$PROJECT_DIR/datasets/dreamer_labels.npy}"
-INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 
-# These reproduce the training budget used by the winning v11 run.
-SOURCE_EPOCHS="${SOURCE_EPOCHS:-4}"
+# Match the existing users-0-3 training budget; environment overrides are optional.
+SOURCE_EPOCHS="${SOURCE_EPOCHS:-6}"
 CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-10}"
 SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 SUITE_ID="${SLURM_JOB_ID:-manual}"
+TARGET_SUBJECTS=(0 1 2 3)
 
 CALIBRATION_LEVEL_ARGS=(
     --calibration-level 3 6
@@ -49,27 +47,9 @@ CALIBRATION_LEVEL_ARGS=(
 
 cd "$PROJECT_DIR"
 
-# Create or reuse the shared Python 3.12 environment. A lock prevents
-# simultaneous jobs from modifying it at the same time.
-if command -v flock >/dev/null 2>&1; then
-    (
-        flock -x 9
-        if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-            python -m venv "$VENV_DIR"
-            "$VENV_DIR/bin/python" -m pip install --upgrade pip
-            "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-        elif [[ "$INSTALL_REQUIREMENTS" == "1" ]]; then
-            "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-        fi
-    ) 9>"$PROJECT_DIR/.venv312_install.lock"
-else
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-        python -m venv "$VENV_DIR"
-        "$VENV_DIR/bin/python" -m pip install --upgrade pip
-        "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-    elif [[ "$INSTALL_REQUIREMENTS" == "1" ]]; then
-        "$VENV_DIR/bin/python" -m pip install -r requirements.txt
-    fi
+if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    echo "ERROR: expected the prepared Python environment at $VENV_DIR" >&2
+    exit 1
 fi
 source "$VENV_DIR/bin/activate"
 
@@ -100,17 +80,6 @@ find_libdevice() {
 }
 
 LIBDEVICE_PATH="$(find_libdevice)"
-if [[ -z "$LIBDEVICE_PATH" ]]; then
-    if command -v flock >/dev/null 2>&1; then
-        (
-            flock -x 9
-            python -m pip install --upgrade nvidia-cuda-nvcc-cu12
-        ) 9>"$PROJECT_DIR/.venv312_install.lock"
-    else
-        python -m pip install --upgrade nvidia-cuda-nvcc-cu12
-    fi
-    LIBDEVICE_PATH="$(find_libdevice)"
-fi
 if [[ -z "$LIBDEVICE_PATH" || ! -f "$LIBDEVICE_PATH" ]]; then
     echo "ERROR: unable to locate libdevice.10.bc."
     exit 1
@@ -123,10 +92,9 @@ if [[ -n "$MODULE_CUDA_ROOT" ]]; then
     export CUDA_PATH="$MODULE_CUDA_ROOT"
 fi
 
-# One fixed configuration: the rank-1 v11 hyperparameters with subject-loss
-# weight 1.0, reconstruction weight 0.1, and the explicit SICModelv15 joint-
-# reconstruction settings. Fixed wrappers keep layer-width lists as one
-# architecture rather than a search grid.
+# One fixed configuration: the rank-1 v11 hyperparameters plus the explicit
+# SICModelv15 joint-reconstruction settings. The fixed wrappers ensure that
+# layer-width lists describe one architecture rather than a search grid.
 MODEL_CONFIG="$(python - <<'PY'
 import json
 
@@ -138,7 +106,7 @@ print(json.dumps({
 
     "mldg_meta_train_subjects": 8,
     "mldg_meta_test_subjects": 4,
-    "mldg_trials_per_subject": 3,
+    "mldg_trials_per_subject": 4,
     "mldg_steps_per_epoch": 20,
     "mldg_inner_learning_rate": 1e-4,
     "mldg_meta_test_weight": 1.0,
@@ -183,7 +151,7 @@ print(json.dumps({
     "use_gcn_gru_branch": True,
     "use_bilstm_branch": True,
     "use_decoder": True,
-    "reconstruction_loss_weight": 0.1,
+    "reconstruction_loss_weight": {"grid": [0.1, 0.4]},
     "decoder_dropout": 0.1,
     "joint_reconstruction_auxiliary_weight": 0.25,
     "joint_reconstruction_initial_alpha": 0.5,
@@ -203,15 +171,26 @@ echo "SIC builder: v15"
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Node: $(hostname)"
 echo "Dataset/target: DREAMER valence"
-echo "Scope: all 23 LOSO target subjects"
+echo "Target subjects: ${TARGET_SUBJECTS[*]}"
 echo "Training: MLDG, $SOURCE_EPOCHS source epochs"
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
-echo "Subject loss weight: 1.0"
-echo "Joint reconstruction: weight=0.1 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configuration source: rank 1 from v11 suite 65452590"
+echo "Joint reconstruction: initial alpha=0.5, auxiliary branch weight=0.25"
+echo "Base architecture: rank 1 from v11 suite 65452590"
+echo "Parallelism: 2 folds x 2 GPUs; episode trials: 32 meta-train / 16 meta-test"
+echo "Per GPU: 16 meta-train / 8 meta-test trials; full-episode VC statistics"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 python --version
 nvidia-smi
+
+# Fail before the long run if two real GPUs disagree with the original
+# full-episode gradients, MLDG updates, metrics, or checkpoint behavior.
+python - <<'PY_GPU'
+import tensorflow as tf
+n = len(tf.config.list_physical_devices("GPU"))
+if n != 4:
+    raise SystemExit(f"This smoke job requires exactly 4 allocated GPUs; visible={n}")
+PY_GPU
+EEGPROC_TEST_GPUS=1 python -m src.tests.test_sic_v15_multi_gpu
 
 python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_train \
     --training-protocol loso_validation \
@@ -222,8 +201,8 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --classification-level trial \
     --n-channels 14 \
     --n-bands 3 \
-    --out-dir "runs/full/sic_trial_bigru_v15_joint_best_v11/DREAMER/valence/suite_${SUITE_ID}/full" \
-    --run-name "dreamer_valence_sic_trial_bigru_v15_mldg_best_v11_full" \
+    --out-dir "runs/smoke/sic_v15_two_gpu/DREAMER/valence/suite_${SUITE_ID}/smoke_val_0_3" \
+    --run-name "smoke_val_0_3" \
     --training-method mldg \
     --source-epochs "$SOURCE_EPOCHS" \
     --source-batch-size "$SOURCE_BATCH_SIZE" \
@@ -247,9 +226,12 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --prediction-diagnostics-threshold-tolerance 0.01 \
     --prediction-diagnostics-seed 42 \
     --ece-bins 15 \
-    --n-jobs 4 \
+    --max-subjects 4 \
+    --target-subjects "${TARGET_SUBJECTS[@]}" \
+    --n-jobs 2 \
+    --gpus-per-fold 2 \
     --gpu-ids 0 1 2 3 \
-    --cpus-per-worker 2 \
+    --cpus-per-worker 4 \
     --verbose 2 \
     --seed 42 \
     --label-threshold-mode global \
