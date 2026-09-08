@@ -184,7 +184,7 @@ print(json.dumps({
     "use_gcn_gru_branch": True,
     "use_bilstm_branch": True,
     "use_decoder": True,
-    "reconstruction_loss_weight": {"grid": [0.4, 0.6]},
+    "reconstruction_loss_weight": 0.6,
     "decoder_dropout": 0.1,
     "joint_reconstruction_auxiliary_weight": 0.25,
     "joint_reconstruction_initial_alpha": 0.5,
@@ -209,6 +209,7 @@ echo "Training: MLDG, $SOURCE_EPOCHS source epochs"
 echo "Parallelism: 2 folds x 2 GPUs; episode trials: 32 meta-train / 16 meta-test"
 echo "Per GPU: 16 meta-train / 8 meta-test trials; full-episode VC statistics"
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
+echo "Selection: maximize zero-shot LOSO balanced accuracy"
 echo "Subject loss weight: 0.2"
 echo "Joint reconstruction: weights=0.4,0.6 initial alpha=0.5 auxiliary branch weight=0.25"
 echo "Configuration source: v15 job 81133 configurations 1 and 2; 4 trials/subject"
@@ -249,11 +250,11 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --calibration-optimizer adamw \
     --calibration-weight-decay 0.00005 \
     --calibration-seed 42 \
-    --selection-metric brier_score \
-    --hyperparameter-selection-level calibration \
+    --selection-metric balanced_accuracy \
+    --hyperparameter-selection-level losocv \
     --decision-threshold 0.5 \
     --prediction-diagnostics \
-    --prediction-diagnostics-metric brier_score \
+    --prediction-diagnostics-metric balanced_accuracy \
     --prediction-diagnostics-every-n-epochs 1 \
     --prediction-diagnostics-max-samples "$PREDICTION_DIAGNOSTICS_MAX_SAMPLES" \
     --prediction-diagnostics-threshold-tolerance 0.01 \

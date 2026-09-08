@@ -7,7 +7,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=18:00:00
+#SBATCH --time=24:00:00
 
 set -euo pipefail
 
@@ -211,6 +211,7 @@ echo "Parallelism: 2 folds x 2 GPUs; episode trials: 24 meta-train / 12 meta-tes
 echo "Per GPU: 12 meta-train / 6 meta-test trials; full-episode VC statistics"
 echo "Arousal retains 2 distinct trials/subject because some class pools contain only 1 trial."
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
+echo "Selection: maximize zero-shot LOSO balanced accuracy"
 echo "Subject loss weight: 0.2"
 echo "Joint reconstruction: weights=0.4,0.6 initial alpha=0.5 auxiliary branch weight=0.25"
 echo "Configuration source: v15 job 81133 configurations 1 and 2; arousal episode setup"
@@ -251,11 +252,11 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --calibration-optimizer adamw \
     --calibration-weight-decay 0.00005 \
     --calibration-seed 42 \
-    --selection-metric brier_score \
-    --hyperparameter-selection-level calibration \
+    --selection-metric balanced_accuracy \
+    --hyperparameter-selection-level losocv \
     --decision-threshold 0.5 \
     --prediction-diagnostics \
-    --prediction-diagnostics-metric brier_score \
+    --prediction-diagnostics-metric balanced_accuracy \
     --prediction-diagnostics-every-n-epochs 1 \
     --prediction-diagnostics-max-samples "$PREDICTION_DIAGNOSTICS_MAX_SAMPLES" \
     --prediction-diagnostics-threshold-tolerance 0.01 \
