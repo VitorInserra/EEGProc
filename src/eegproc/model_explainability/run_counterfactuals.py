@@ -25,6 +25,34 @@ else:
     from counterfactual_optimizer import CounterfactualOptimizer
 
 
+OBJECTIVE_TERMS = ("target", "latent", "decoded", "physiological")
+
+
+def format_optimization_diagnostics(row):
+    """Format raw terms, weighted contributions, and total-loss shares."""
+    total = float(row["total"])
+    raw = " ".join(f"{name}={row[name]:.6g}" for name in OBJECTIVE_TERMS)
+    weighted = " ".join(
+        f"{name}={row[f'weighted_{name}']:.6g}" for name in OBJECTIVE_TERMS
+    )
+    if total > np.finfo(float).eps:
+        shares = " ".join(
+            f"{name}={100.0 * row[f'weighted_{name}'] / total:.1f}%"
+            for name in OBJECTIVE_TERMS
+        )
+    else:
+        shares = " ".join(f"{name}=n/a" for name in OBJECTIVE_TERMS)
+    gradient = row["gradient_norm"]
+    gradient_text = "n/a" if gradient is None else f"{gradient:.6g}"
+    return (
+        f"step={row['step']} total={total:.6g} "
+        f"RAW[{raw}] WEIGHTED[{weighted}] SHARE[{shares}] "
+        f"target_p={row['target_probability']:.4f} "
+        f"predicted={row['predicted_class']} grad={gradient_text} "
+        f"success={row['success']}"
+    )
+
+
 def load_model(path, module):
     """Import custom class registrations, then load .keras with compile=False.
 
@@ -186,6 +214,13 @@ def run(args):
         f"reconstruction paths: {', '.join(optimizer.decoded_names)}",
         flush=True,
     )
+    if optimizer.decoder_mode == "joint":
+        alpha = float(model.joint_reconstruction_fusion.alpha.numpy())
+        print(
+            "Frozen joint reconstruction weights: "
+            f"GCN-GRU alpha={alpha:.6g} | BiLSTM 1-alpha={1.0 - alpha:.6g}",
+            flush=True,
+        )
     print(
         "Physiological validity = 0 (placeholder; no constraint enforced).", flush=True
     )
@@ -199,24 +234,7 @@ def run(args):
 
         def report(row):
             if args.log_every and row["step"] % args.log_every == 0:
-                fields = " ".join(
-                    f"{key}={row[key]:.6g}"
-                    for key in (
-                        "total",
-                        "target",
-                        "latent",
-                        "decoded",
-                        "physiological",
-                        "weighted_target",
-                        "weighted_latent",
-                        "weighted_decoded",
-                        "weighted_physiological",
-                    )
-                )
-                print(
-                    f"step={row['step']} {fields} target_p={row['target_probability']:.4f} predicted={row['predicted_class']} grad={row['gradient_norm']} success={row['success']}",
-                    flush=True,
-                )
+                print(format_optimization_diagnostics(row), flush=True)
 
         result = optimizer.optimize(
             x[index : index + 1], target_class=args.target_class, progress=report

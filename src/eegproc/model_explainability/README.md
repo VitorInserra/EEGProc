@@ -239,6 +239,13 @@ finite iterate. A non-finite original objective is an error.
 actual updates and can be larger. The last history row is not necessarily
 the returned candidate. `--max-steps 0` performs baseline diagnostics only.
 
+Console diagnostics default to every evaluated step. Each line groups the
+four raw objective terms, their weighted contributions, and each contribution's
+percentage of the total loss. `--log-every N` reduces the display frequency;
+`--log-every 0` suppresses console diagnostics without changing `history.csv`.
+Joint mode also prints the checkpoint's frozen GCN-GRU `alpha` and BiLSTM
+`1-alpha` weights once before optimization.
+
 Each decoded counterfactual is re-encoded and classified by the full saved
 model. Report its success separately: a successful latent need not decode
 to EEG that the model classifies as the target. Original reconstructions are

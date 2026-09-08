@@ -116,8 +116,11 @@ def build_parser():
     parser.add_argument(
         "--log-every",
         type=_nonnegative_int,
-        default=10,
-        help="0 suppresses step logs; history is still saved every step.",
+        default=1,
+        help=(
+            "Print objective diagnostics every N evaluated steps (default: 1); "
+            "0 suppresses console logs. History is still saved every step."
+        ),
     )
     parser.add_argument("--seed", type=_nonnegative_int, default=42)
     parser.add_argument(

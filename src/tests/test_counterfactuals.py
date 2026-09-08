@@ -18,6 +18,9 @@ from eegproc.model_explainability.counterfactual_optimizer import (  # noqa: E40
 from eegproc.model_explainability.counterfactual_plotting import (  # noqa: E402
     load_counterfactual_trial,
 )
+from eegproc.model_explainability.run_counterfactuals import (  # noqa: E402
+    format_optimization_diagnostics,
+)
 
 
 @pytest.fixture(scope="module")
@@ -99,6 +102,38 @@ def test_joint_decoder_mode_is_exposed_by_cli():
     )
     assert action.default == "branches"
     assert tuple(action.choices) == ("branches", "joint")
+
+
+def test_step_diagnostics_show_all_objective_contributions():
+    row = {
+        "step": 3,
+        "total": 1.0,
+        "target": 2.0,
+        "latent": 3.0,
+        "decoded": 4.0,
+        "physiological": 0.0,
+        "weighted_target": 0.5,
+        "weighted_latent": 0.2,
+        "weighted_decoded": 0.3,
+        "weighted_physiological": 0.0,
+        "target_probability": 0.75,
+        "predicted_class": 1,
+        "gradient_norm": 0.125,
+        "success": False,
+    }
+
+    diagnostics = format_optimization_diagnostics(row)
+
+    assert "RAW[target=2 latent=3 decoded=4 physiological=0]" in diagnostics
+    assert "WEIGHTED[target=0.5 latent=0.2 decoded=0.3 physiological=0]" in diagnostics
+    assert "SHARE[target=50.0% latent=20.0% decoded=30.0% physiological=0.0%]" in diagnostics
+
+
+def test_cli_prints_every_optimization_step_by_default():
+    action = next(
+        action for action in build_parser()._actions if action.dest == "log_every"
+    )
+    assert action.default == 1
 
 
 def test_plot_loader_accepts_joint_reconstruction(tmp_path):
