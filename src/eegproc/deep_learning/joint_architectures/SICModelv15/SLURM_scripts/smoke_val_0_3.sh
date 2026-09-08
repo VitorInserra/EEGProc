@@ -249,6 +249,7 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --max-subjects 4 \
     --target-subjects "${TARGET_SUBJECTS[@]}" \
     --n-jobs 4 \
+    --gpus-per-fold 2 \
     --gpu-ids 0 1 2 3 \
     --cpus-per-worker 2 \
     --verbose 2 \
