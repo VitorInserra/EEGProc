@@ -12,6 +12,9 @@ from eegproc.deep_learning.joint_architectures.SICModelv15.sic_model import (  #
 from eegproc.model_explainability.counterfactual_args import (  # noqa: E402
     build_parser,
 )
+from eegproc.model_explainability.counterfactual_loss import (  # noqa: E402
+    CounterfactualLoss,
+)
 from eegproc.model_explainability.counterfactual_optimizer import (  # noqa: E402
     CounterfactualOptimizer,
 )
@@ -22,15 +25,19 @@ from eegproc.model_explainability.run_counterfactuals import (  # noqa: E402
     format_optimization_diagnostics,
 )
 
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:VCSC calibration was measured.*:RuntimeWarning"
+)
+
 
 @pytest.fixture(scope="module")
 def tiny_joint_model():
     return build_sic_model(
-        input_shape=(2, 4, 6),
-        adjacency=np.eye(2, dtype=np.float32),
+        input_shape=(2, 4, 42),
+        adjacency=np.eye(14, dtype=np.float32),
         classification_level="trial",
         n_classes=2,
-        n_channels=2,
+        n_channels=14,
         n_bands=3,
         gcn_units=(4,),
         spectral_gru_units=4,
@@ -46,7 +53,7 @@ def tiny_joint_model():
 
 
 def test_joint_decoder_mode_uses_only_fused_reconstruction(tiny_joint_model):
-    inputs = tf.random.normal((1, 2, 4, 6), seed=7)
+    inputs = tf.random.normal((1, 2, 4, 42), seed=7)
     weights_before = [value.numpy().copy() for value in tiny_joint_model.weights]
     optimizer = CounterfactualOptimizer(
         tiny_joint_model,
@@ -61,6 +68,8 @@ def test_joint_decoder_mode_uses_only_fused_reconstruction(tiny_joint_model):
     assert result["summary"]["joint_reconstruction_alpha"] == pytest.approx(0.3)
     assert set(result["summary"]["decoded_trials"]) == {"joint"}
     assert "decoded_joint" in result["history"][0]
+    assert np.isfinite(result["history"][0]["physiological"])
+    assert result["history"][0]["weighted_physiological"] == pytest.approx(0.0)
     assert "decoded_gcn_gru" not in result["history"][0]
     assert "decoded_bilstm" not in result["history"][0]
     assert set(result["arrays"]) == {
@@ -70,6 +79,15 @@ def test_joint_decoder_mode_uses_only_fused_reconstruction(tiny_joint_model):
         "x_reconstructed_joint",
         "x_prime_joint",
     }
+    decoded = result["summary"]["decoded_trials"]["joint"]
+    assert np.isfinite(decoded["vcsc_original_reconstruction"])
+    assert np.isfinite(decoded["vcsc_counterfactual"])
+    assert decoded["vcsc_delta"] == pytest.approx(
+        decoded["vcsc_counterfactual"]
+        - decoded["vcsc_original_reconstruction"]
+    )
+    assert np.isfinite(result["summary"]["physiological_validity"])
+    assert result["summary"]["physiological_constraint_enforced"] is False
     np.testing.assert_allclose(
         result["arrays"]["x_reconstructed_joint"],
         tiny_joint_model.reconstruct_joint(inputs).numpy(),
@@ -83,7 +101,7 @@ def test_joint_decoder_mode_uses_only_fused_reconstruction(tiny_joint_model):
 
 
 def test_branch_decoder_mode_remains_backward_compatible(tiny_joint_model):
-    inputs = tf.zeros((1, 2, 4, 6), dtype=tf.float32)
+    inputs = tf.zeros((1, 2, 4, 42), dtype=tf.float32)
     result = CounterfactualOptimizer(
         tiny_joint_model,
         max_steps=0,
@@ -102,6 +120,44 @@ def test_joint_decoder_mode_is_exposed_by_cli():
     )
     assert action.default == "branches"
     assert tuple(action.choices) == ("branches", "joint")
+
+
+def test_vcsc_settings_are_exposed_by_cli():
+    actions = {action.dest: action for action in build_parser()._actions}
+
+    assert actions["physiological_weight"].default == 0.0
+    assert actions["vcsc_distance_cm"].default == 12.0
+    assert actions["vcsc_tau_cm"].default == 4.0
+    assert actions["vcsc_z0"].default == 2.0
+    assert actions["vcsc_z_max"].default == 20.0
+
+
+def test_vcsc_weight_contributes_to_total_objective():
+    x = tf.random.normal((1, 2, 4, 42), seed=11)
+    z = tf.zeros((1, 1, 1, 1), dtype=tf.float32)
+    loss = CounterfactualLoss(
+        latent_weight=0.0,
+        decoded_weight=0.0,
+        physiological_weight=0.25,
+    )
+
+    terms, _ = loss.central_loss(
+        logits=tf.constant([[0.0, 0.0]]),
+        target_class=1,
+        z_prime=z,
+        z=z,
+        x=x,
+        decoder=lambda _: {"joint": x},
+    )
+
+    assert float(terms["physiological"].numpy()) > 0.0
+    assert float(terms["weighted_physiological"].numpy()) == pytest.approx(
+        0.25 * float(terms["physiological"].numpy())
+    )
+    assert float(terms["total"].numpy()) == pytest.approx(
+        float(terms["weighted_target"].numpy())
+        + float(terms["weighted_physiological"].numpy())
+    )
 
 
 def test_step_diagnostics_show_all_objective_contributions():

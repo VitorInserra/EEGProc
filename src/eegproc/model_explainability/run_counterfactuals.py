@@ -166,6 +166,10 @@ def run(args):
         decoded_weight=args.decoded_weight,
         physiological_weight=args.physiological_weight,
         target_probability=args.target_probability,
+        vcsc_distance_cm=args.vcsc_distance_cm,
+        vcsc_tau_cm=args.vcsc_tau_cm,
+        vcsc_z0=args.vcsc_z0,
+        vcsc_z_max=args.vcsc_z_max,
     )
     optimizer = CounterfactualOptimizer(
         model,
@@ -200,7 +204,7 @@ def run(args):
             "tensorflow_version": tf.__version__,
             "trial_input_shape": list(x.shape[1:]),
             "selected_trial_ids": trials[indices].tolist(),
-            "physiological_constraint_enforced": False,
+            "physiological_constraint_enforced": loss.physiological_weight > 0,
             "preprocessing_match": "caller must use the settings used to train this checkpoint",
             "checkpoint_subject_match": "caller must select the intended LOSO checkpoint",
         },
@@ -221,8 +225,15 @@ def run(args):
             f"GCN-GRU alpha={alpha:.6g} | BiLSTM 1-alpha={1.0 - alpha:.6g}",
             flush=True,
         )
+    physiological_status = (
+        "computed and logged, but diagnostic only"
+        if loss.physiological_weight == 0
+        else "active in the objective"
+    )
     print(
-        "Physiological validity = 0 (placeholder; no constraint enforced).", flush=True
+        "Physiological validity: VCSC | "
+        f"weight={loss.physiological_weight:.6g} ({physiological_status})",
+        flush=True,
     )
     summaries = []
     for index in indices:
@@ -269,6 +280,13 @@ def run(args):
                 f"Decoded {branch}: class={decoded['predicted_class']} target_p={decoded['target_probability']:.4f} success={decoded['success']} MSE_to_x={details['counterfactual_to_original_mse']:.6g}",
                 flush=True,
             )
+            print(
+                f"VCSC {branch}: "
+                f"reconstructed_original={details['vcsc_original_reconstruction']:.6g} "
+                f"counterfactual={details['vcsc_counterfactual']:.6g} "
+                f"delta={details['vcsc_delta']:+.6g}",
+                flush=True,
+            )
     aggregate = {
         "n_trials": len(summaries),
         "latent_success_rate": float(
@@ -291,8 +309,74 @@ def run(args):
         "mean_selected_decoded_mse": float(
             np.mean([s["selected_losses"]["decoded"] for s in summaries])
         ),
-        "physiological_validity": 0.0,
-        "physiological_constraint_enforced": False,
+        "mean_selected_physiological": float(
+            np.mean([s["selected_losses"]["physiological"] for s in summaries])
+        ),
+        "mean_vcsc_reconstructed_original": {
+            name: float(
+                np.mean(
+                    [
+                        s["decoded_trials"][name][
+                            "vcsc_original_reconstruction"
+                        ]
+                        for s in summaries
+                    ]
+                )
+            )
+            for name in optimizer.decoded_names
+        },
+        "mean_vcsc_counterfactual": {
+            name: float(
+                np.mean(
+                    [
+                        s["decoded_trials"][name]["vcsc_counterfactual"]
+                        for s in summaries
+                    ]
+                )
+            )
+            for name in optimizer.decoded_names
+        },
+        "mean_vcsc_delta": {
+            name: float(
+                np.mean(
+                    [s["decoded_trials"][name]["vcsc_delta"] for s in summaries]
+                )
+            )
+            for name in optimizer.decoded_names
+        },
+        "latent_class_flip_rate": float(
+            np.mean(
+                [
+                    s["latent_counterfactual"]["predicted_class"]
+                    != s["original"]["predicted_class"]
+                    for s in summaries
+                ]
+            )
+        ),
+        "decoded_class_flip_rate": {
+            name: float(
+                np.mean(
+                    [
+                        s["decoded_trials"][name]["counterfactual"][
+                            "predicted_class"
+                        ]
+                        != s["original"]["predicted_class"]
+                        for s in summaries
+                    ]
+                )
+            )
+            for name in optimizer.decoded_names
+        },
+        "mean_target_probability_delta": float(
+            np.mean(
+                [
+                    s["latent_counterfactual"]["target_probability"]
+                    - s["original"]["target_probability"]
+                    for s in summaries
+                ]
+            )
+        ),
+        "physiological_constraint_enforced": loss.physiological_weight > 0,
     }
     _write_json(out / "summary.json", aggregate)
     print(f"\nRun summary:\n{json.dumps(aggregate, indent=2)}", flush=True)

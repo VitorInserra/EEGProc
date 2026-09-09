@@ -8,6 +8,7 @@ construction.
 | --- | --- |
 | `counterfactual_args.py` | CLI arguments and their validation; no TensorFlow imports. |
 | `counterfactual_loss.py` | `CounterfactualLoss`: target, latent, decoded, physiological, and central loss methods. |
+| `vcsc_calibration_dreamer.npz` | Measured DREAMER calibration curves used by the VCSC term. |
 | `counterfactual_optimizer.py` | Full-trial latent gradient descent with the saved SIC classifier and decoders. |
 | `run_counterfactuals.py` | Model/data loading, trial selection, printed diagnostics, and result files. |
 | `counterfactual_plotting.py` | Shared counterfactual NPZ loading and channel-label helpers. |
@@ -60,6 +61,7 @@ PYTHONPATH=src python -m eegproc.model_explainability.run_counterfactuals \
   --target-probability 0.8 \
   --learning-rate 0.01 --max-steps 20 \
   --target-weight 1 --latent-weight 0.1 --decoded-weight 0.1 \
+  --physiological-weight 0 \
   --log-every 1 \
   --out-dir runs/counterfactuals/subject0_trial0_smoke
 ```
@@ -144,7 +146,10 @@ trial for subject 0 in joint-decoder mode. Raw data defaults to
 `datasets/dreamer_eeg.npy` and `datasets/dreamer_labels.npy`. To use a prepared
 trial file instead, also export `TRIALS_NPZ=/absolute/path/prepared_trials.npz`.
 The optimization settings can be overridden through the environment variables
-listed near the top of the script.
+listed near the top of the script. In particular, set
+`PHYSIOLOGICAL_WEIGHT` to make VCSC part of the optimized objective; its
+default is `0.0`, which computes and reports VCSC as a diagnostic only. The
+VCSC distance and z-score settings are also exposed as environment variables.
 
 Every task also creates the joint heatmap, signed topography, and optimization
 trajectory. Outputs are grouped under:
@@ -181,9 +186,15 @@ default `--decoder-mode branches` retains the original objective:
 \[
 L = \lambda_t\max(0, \log p_{min}-\log p(y^*\mid z'))
   + \lambda_z\operatorname{MSE}(z',z)
-  + \lambda_x\frac{1}{B}\sum_b\operatorname{MSE}(D_b(z'_b),x)
-  + \lambda_{phys}\cdot 0.
+  + \lambda_x\frac{1}{R}\sum_r\operatorname{MSE}(R_r(z'),x)
+  + \lambda_{phys}\frac{1}{R}\sum_r\operatorname{VCSC}(R_r(z')).
 \]
+
+Here, `r` ranges over the reconstruction paths selected by `--decoder-mode`:
+the two independent branch paths in branch mode or the single fused path in
+joint mode. VCSC compares spatial coherence and debiased wPLI² across all 91
+electrode pairs and three bands with the measured DREAMER calibration bundled
+in `vcsc_calibration_dreamer.npz`.
 
 `z_prime` has shape `(1,W,T,C)`, before the recurrent classifier. Every
 timestep is retained: `(1,W,T,C)` becomes `(1,W*T,C)` for the saved BiGRU,
@@ -218,8 +229,11 @@ call uses `training=False`. Encoder weights, BiGRU/VC weights, decoder weights,
 and model trainability flags are unchanged. A new Adam instance is created
 for each trial. Gradients are checked for finiteness and clipped by norm.
 
-**`physiological_validity()` is exactly zero for now.** Even a nonzero
-`--physiological-weight` multiplies zero. This is not a validity assessment.
+VCSC is evaluated and logged even when `--physiological-weight 0`; at that
+default it is diagnostic only and has no gradient contribution. A positive
+weight makes its weighted value part of the objective. The VCSC score is one
+physiological-plausibility diagnostic, not a certificate that a generated EEG
+trial is physiologically valid.
 
 ## Selection and interpretation
 
@@ -250,7 +264,9 @@ Each decoded counterfactual is re-encoded and classified by the full saved
 model. Report its success separately: a successful latent need not decode
 to EEG that the model classifies as the target. Original reconstructions are
 also reclassified to expose decoder error before any counterfactual change.
-These are optimization diagnostics, not improved accuracy or causal effects.
+The final report includes VCSC for the reconstructed original, the decoded
+counterfactual, and their difference. These are optimization diagnostics, not
+improved accuracy or causal effects.
 
 ## Outputs
 
@@ -261,10 +277,10 @@ overwritten. Completed trials are saved individually.
 | --- | --- |
 | `settings.json` | Arguments, loss weights, model path, input shape, selected trials, environment version. |
 | `subject_<id>_trial_<id>/history.csv` | Step 0 and each finite evaluated step: total/raw/weighted losses, selected reconstruction-path MSEs, probabilities, prediction, success, gradient norm. |
-| `subject_<id>_trial_<id>/result.json` | Original/latent/decoded predictions, selected losses, selected step, update count, runtime, stop reason. |
+| `subject_<id>_trial_<id>/result.json` | Original/latent/decoded predictions, selected losses, VCSC metrics, selected step, update count, runtime, stop reason. |
 | `subject_<id>_trial_<id>/counterfactual.npz` | `x`, `z`, `z_prime`, `x_reconstructed_<path>`, `x_prime_<path>`; joint mode uses `<path>=joint`. |
 | `results.json` | Completed trial summaries, updated after each trial. |
-| `summary.json` | Aggregate latent and per-reconstruction-path success rates and mean distances, after all trials finish. |
+| `summary.json` | Aggregate success, class-flip, distance, probability-change, and VCSC metrics after all trials finish. |
 
 `x_prime_<path>` remains in the model's preprocessed input space. This
 runner does not reconstruct missing raw EEG bands or undo normalization.

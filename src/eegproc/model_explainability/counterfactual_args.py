@@ -106,7 +106,34 @@ def build_parser():
         "--physiological-weight",
         type=_nonnegative_float,
         default=0.0,
-        help="Reserved: physiological_validity is always zero for now.",
+        help=(
+            "Weight for the VCSC physiological-validity penalty applied to "
+            "each selected decoded reconstruction (default: 0, diagnostic only)."
+        ),
+    )
+    parser.add_argument(
+        "--vcsc-distance-cm",
+        type=_nonnegative_float,
+        default=12.0,
+        help="Electrode distance below which VCSC deviations receive extra weight.",
+    )
+    parser.add_argument(
+        "--vcsc-tau-cm",
+        type=_positive_float,
+        default=4.0,
+        help="Distance-decay scale for the VCSC proximity weighting.",
+    )
+    parser.add_argument(
+        "--vcsc-z0",
+        type=_nonnegative_float,
+        default=2.0,
+        help="VCSC z-deviation threshold before a pair is penalized.",
+    )
+    parser.add_argument(
+        "--vcsc-z-max",
+        type=_positive_float,
+        default=20.0,
+        help="Maximum VCSC pair deviation before exponentiation.",
     )
     parser.add_argument(
         "--stop-on-success",
@@ -138,6 +165,10 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if args.target_probability >= 1:
         parser.error("--target-probability must be strictly between 0 and 1")
+    if args.vcsc_z_max <= args.vcsc_z0:
+        parser.error("--vcsc-z-max must exceed --vcsc-z0")
+    if args.vcsc_z_max - args.vcsc_z0 > 80:
+        parser.error("--vcsc-z-max minus --vcsc-z0 must not exceed 80")
     if args.window_overlap >= 1 or not math.isfinite(args.median_label):
         parser.error("--window-overlap must be in [0,1); --median-label must be finite")
     raw_options = (

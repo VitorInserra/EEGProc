@@ -347,6 +347,18 @@ class CounterfactualOptimizer:
                 "decoded_change_mse": float(
                     self.loss.latent_distance(reconstruction, baseline).numpy()
                 ),
+                "vcsc_original_reconstruction": float(
+                    self.loss.physiological_validity(baseline).numpy()
+                ),
+                "vcsc_counterfactual": float(
+                    self.loss.physiological_validity(reconstruction).numpy()
+                ),
+                "vcsc_delta": float(
+                    (
+                        self.loss.physiological_validity(reconstruction)
+                        - self.loss.physiological_validity(baseline)
+                    ).numpy()
+                ),
             }
         return {
             "history": history,
@@ -370,8 +382,12 @@ class CounterfactualOptimizer:
                 "steps_completed": steps_completed,
                 "stop_reason": stop_reason,
                 "elapsed_seconds": time.perf_counter() - started,
-                "physiological_validity": 0.0,
-                "physiological_constraint_enforced": False,
+                "physiological_validity": float(
+                    final_terms["physiological"].numpy()
+                ),
+                "physiological_constraint_enforced": (
+                    self.loss.physiological_weight > 0
+                ),
             },
             "arrays": arrays,
         }

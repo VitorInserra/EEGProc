@@ -36,6 +36,11 @@ MAX_STEPS="${MAX_STEPS:-200}"
 TARGET_WEIGHT="${TARGET_WEIGHT:-1.0}"
 LATENT_WEIGHT="${LATENT_WEIGHT:-0.1}"
 DECODED_WEIGHT="${DECODED_WEIGHT:-0.1}"
+PHYSIOLOGICAL_WEIGHT="${PHYSIOLOGICAL_WEIGHT:-0.0}"
+VCSC_DISTANCE_CM="${VCSC_DISTANCE_CM:-12.0}"
+VCSC_TAU_CM="${VCSC_TAU_CM:-4.0}"
+VCSC_Z0="${VCSC_Z0:-2.0}"
+VCSC_Z_MAX="${VCSC_Z_MAX:-20.0}"
 GRADIENT_CLIP_NORM="${GRADIENT_CLIP_NORM:-5.0}"
 LOG_EVERY="${LOG_EVERY:-1}"
 SEED="${SEED:-42}"
@@ -143,6 +148,11 @@ echo "Output: $TASK_ROOT"
     --target-weight "$TARGET_WEIGHT" \
     --latent-weight "$LATENT_WEIGHT" \
     --decoded-weight "$DECODED_WEIGHT" \
+    --physiological-weight "$PHYSIOLOGICAL_WEIGHT" \
+    --vcsc-distance-cm "$VCSC_DISTANCE_CM" \
+    --vcsc-tau-cm "$VCSC_TAU_CM" \
+    --vcsc-z0 "$VCSC_Z0" \
+    --vcsc-z-max "$VCSC_Z_MAX" \
     --log-every "$LOG_EVERY" \
     --seed "$SEED" \
     --out-dir "$TASK_ROOT"
