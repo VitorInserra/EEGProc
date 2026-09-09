@@ -176,7 +176,7 @@ print(json.dumps({
 
     "use_subject_adversarial": True,
     "subject_adversarial_weight": 0.6,
-    "subject_loss_weight": {"grid": [0.2, 0.3]},
+    "subject_loss_weight": {"0.2,
     "subject_hidden_units": 64,
     "subject_dropout": 0.0,
 
@@ -249,7 +249,6 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --max-subjects 4 \
     --target-subjects "${TARGET_SUBJECTS[@]}" \
     --n-jobs 4 \
-    
     --gpu-ids 0 1 2 3 \
     --cpus-per-worker 2 \
     --verbose 2 \
