@@ -41,6 +41,8 @@ class CounterfactualOptimizer:
         *,
         loss=None,
         learning_rate=0.01,
+        learning_rate_decay=1.0,
+        target_loss_component="confidence",
         max_steps=200,
         gradient_clip_norm=5.0,
         stop_on_success=False,
@@ -48,6 +50,17 @@ class CounterfactualOptimizer:
     ):
         if not math.isfinite(learning_rate) or learning_rate <= 0:
             raise ValueError("learning_rate must be finite and positive.")
+        if (
+            not math.isfinite(learning_rate_decay)
+            or not 0 < learning_rate_decay <= 1
+        ):
+            raise ValueError("learning_rate_decay must be finite and in (0, 1].")
+        target_loss_component = str(target_loss_component).strip().lower()
+        if target_loss_component not in {"confidence", "focal", "vc", "focal_vc"}:
+            raise ValueError(
+                "target_loss_component must be 'confidence', 'focal', 'vc', "
+                "or 'focal_vc'."
+            )
         if (
             isinstance(max_steps, bool)
             or not isinstance(max_steps, (int, np.integer))
@@ -98,17 +111,59 @@ class CounterfactualOptimizer:
             if self.decoder_mode == "joint"
             else tuple(name for name, _ in self.branches)
         )
-        self.learning_rate, self.max_steps = float(learning_rate), int(max_steps)
+        self.learning_rate = float(learning_rate)
+        self.learning_rate_decay = float(learning_rate_decay)
+        self.target_loss_component = target_loss_component
+        self.max_steps = int(max_steps)
         self.gradient_clip_norm, self.stop_on_success = (
             gradient_clip_norm,
             bool(stop_on_success),
         )
 
-    def _classify(self, latent):
-        """Reshape (1,W,T,C) to (1,W*T,C); reuse the saved recurrent/VC head."""
+    def _classification_state(self, latent):
+        """Return the frozen SIC classifier embedding and its sole logits."""
         sequence = tf.reshape(latent, [1, -1, tf.shape(latent)[-1]])
         embedding = self.model.trial_recurrent_classifier(sequence, training=False)
-        return tf.cast(self.model.vc_target(embedding, training=False), tf.float32)
+        logits = tf.cast(self.model.vc_target(embedding, training=False), tf.float32)
+        return tf.cast(embedding, tf.float32), logits
+
+    def _classify(self, latent):
+        """Reshape the latent trial and return its frozen classifier logits."""
+        return self._classification_state(latent)[1]
+
+    def _target_components(self, embedding, logits, target_class):
+        """Decompose the frozen classifier objective before differentiation."""
+        labels = tf.fill([tf.shape(logits)[0]], tf.cast(target_class, tf.int32))
+        vc = self.model.vc_target.vc_loss_components(
+            mh=embedding,
+            y=labels,
+            alpha=float(getattr(self.model, "vc_alpha", 1.0)),
+            beta=float(getattr(self.model, "vc_beta", 0.0)),
+            gamma=float(getattr(self.model, "vc_gamma", 0.0)),
+            lambda_=float(getattr(self.model, "vc_lambda", 0.0)),
+            logits=logits,
+        )
+        confidence = self.loss.target_loss(logits, target_class)
+        focal = tf.cast(vc["weighted_focal_loss"], logits.dtype)
+        vc_latent = tf.cast(vc["weighted_latent_posterior_kl"], logits.dtype)
+        vc_discriminator = tf.cast(vc["weighted_discriminator_kl"], logits.dtype)
+        vc_prior = tf.cast(vc["weighted_class_prior_kl"], logits.dtype)
+        vc_only = vc_latent + vc_discriminator + vc_prior
+        focal_vc = focal + vc_only
+        selected = {
+            "confidence": confidence,
+            "focal": focal,
+            "vc": vc_only,
+            "focal_vc": focal_vc,
+        }[self.target_loss_component]
+        return selected, {
+            "target_confidence_component": confidence,
+            "target_focal_component": focal,
+            "target_vc_component": vc_only,
+            "target_vc_latent_posterior_kl": vc_latent,
+            "target_vc_discriminator_kl": vc_discriminator,
+            "target_vc_class_prior_kl": vc_prior,
+        }
 
     def _decode_branches(self, latent, x):
         """Decode each branch per window, then restore the original trial axes.
@@ -239,7 +294,13 @@ class CounterfactualOptimizer:
         original_prediction = self._prediction(original_logits, target_class)
         original_decoded = self._decode(z, x)
         variable = tf.Variable(z, name="counterfactual_trial_features")
-        descent = tf.keras.optimizers.Adam(learning_rate=self.learning_rate)
+        learning_rate = tf.keras.optimizers.schedules.ExponentialDecay(
+            initial_learning_rate=self.learning_rate,
+            decay_steps=1,
+            decay_rate=self.learning_rate_decay,
+            staircase=True,
+        )
+        descent = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         decode = lambda candidate: self._decode(candidate, x)
         history, best_key, best_latent, selected_step = [], None, None, None
         stop_reason, steps_completed = "max_steps", 0
@@ -247,7 +308,10 @@ class CounterfactualOptimizer:
         for step in range(self.max_steps + 1):
             with tf.GradientTape(watch_accessed_variables=False) as tape:
                 tape.watch(variable)
-                logits = self._classify(variable)
+                embedding, logits = self._classification_state(variable)
+                target_loss, target_components = self._target_components(
+                    embedding, logits, target_class
+                )
                 terms, _ = self.loss.central_loss(
                     logits=logits,
                     target_class=target_class,
@@ -255,6 +319,8 @@ class CounterfactualOptimizer:
                     z=z,
                     x=x,
                     decoder=decode,
+                    target_loss_override=target_loss,
+                    target_components=target_components,
                 )
             gradient = tape.gradient(terms["total"], variable)
             if gradient is None:
@@ -288,6 +354,9 @@ class CounterfactualOptimizer:
             )
             row = {
                 "step": step,
+                "target_loss_component": self.target_loss_component,
+                "learning_rate": self.learning_rate
+                * self.learning_rate_decay**step,
                 **values,
                 **{k: v for k, v in prediction.items() if k != "probabilities"},
                 **{
@@ -315,7 +384,10 @@ class CounterfactualOptimizer:
             descent.apply_gradients([(gradient, variable)])
             steps_completed += 1
 
-        final_logits = self._classify(best_latent)
+        final_embedding, final_logits = self._classification_state(best_latent)
+        final_target_loss, final_target_components = self._target_components(
+            final_embedding, final_logits, target_class
+        )
         final_terms, decoded = self.loss.central_loss(
             logits=final_logits,
             target_class=target_class,
@@ -323,6 +395,8 @@ class CounterfactualOptimizer:
             z=z,
             x=x,
             decoder=decode,
+            target_loss_override=final_target_loss,
+            target_components=final_target_components,
         )
         latent_prediction = self._prediction(final_logits, target_class)
         arrays = {"x": x.numpy(), "z": z.numpy(), "z_prime": best_latent.numpy()}
@@ -364,6 +438,7 @@ class CounterfactualOptimizer:
             "history": history,
             "summary": {
                 "target_class": target_class,
+                "target_loss_component": self.target_loss_component,
                 "decoder_mode": self.decoder_mode,
                 "joint_reconstruction_alpha": (
                     float(self.model.joint_reconstruction_fusion.alpha.numpy())

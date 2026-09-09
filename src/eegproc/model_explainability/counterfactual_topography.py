@@ -116,8 +116,13 @@ def plot_band_topographies(
     colorbar_label: str,
     shared_scale: bool = False,
     signed: bool | None = None,
+    channel_positions: np.ndarray | None = None,
 ):
-    """Plot ``(bands, channels)`` values with band-relative color scales."""
+    """Plot ``(bands, channels)`` values with band-relative color scales.
+
+    ``channel_positions`` is an optional normalized ``(channels, 2)`` array
+    for non-DREAMER montages. Omitting it preserves the original DREAMER lookup.
+    """
     values = np.asarray(values, dtype=float)
     expected_shape = (len(band_names), len(channel_names))
     if values.shape != expected_shape or not np.isfinite(values).all():
@@ -127,7 +132,18 @@ def plot_band_topographies(
     if len(channel_names) < 3:
         raise ValueError("At least three positioned channels are required.")
 
-    positions = _channel_positions(channel_names)
+    if channel_positions is None:
+        positions = _channel_positions(channel_names)
+    else:
+        positions = np.asarray(channel_positions, dtype=float)
+        if (
+            positions.shape != (len(channel_names), 2)
+            or not np.isfinite(positions).all()
+        ):
+            raise ValueError(
+                "channel_positions must be finite and shaped "
+                f"{(len(channel_names), 2)}."
+            )
     x_positions, y_positions = positions[:, 0], positions[:, 1]
     triangulation = mtri.Triangulation(x_positions, y_positions)
     grid_axis = np.linspace(-1.0, 1.0, 250)

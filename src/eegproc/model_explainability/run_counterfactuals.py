@@ -44,8 +44,13 @@ def format_optimization_diagnostics(row):
         shares = " ".join(f"{name}=n/a" for name in OBJECTIVE_TERMS)
     gradient = row["gradient_norm"]
     gradient_text = "n/a" if gradient is None else f"{gradient:.6g}"
+    learning_rate = row.get("learning_rate")
+    learning_rate_text = (
+        "" if learning_rate is None else f"lr={learning_rate:.6g} "
+    )
     return (
         f"step={row['step']} total={total:.6g} "
+        f"{learning_rate_text}"
         f"RAW[{raw}] WEIGHTED[{weighted}] SHARE[{shares}] "
         f"target_p={row['target_probability']:.4f} "
         f"predicted={row['predicted_class']} grad={gradient_text} "
@@ -175,6 +180,8 @@ def run(args):
         model,
         loss=loss,
         learning_rate=args.learning_rate,
+        learning_rate_decay=args.learning_rate_decay,
+        target_loss_component=args.target_loss_component,
         max_steps=args.max_steps,
         gradient_clip_norm=args.gradient_clip_norm,
         stop_on_success=args.stop_on_success,
@@ -216,6 +223,10 @@ def run(args):
     print(
         f"Decoder mode: {optimizer.decoder_mode} | "
         f"reconstruction paths: {', '.join(optimizer.decoded_names)}",
+        flush=True,
+    )
+    print(
+        f"Target loss component: {optimizer.target_loss_component}",
         flush=True,
     )
     if optimizer.decoder_mode == "joint":

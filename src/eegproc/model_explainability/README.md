@@ -178,6 +178,73 @@ PYTHONPATH=src python -m \
   --subject-id 0 --expected-trials 18 --require-complete
 ```
 
+## Model-agnostic runner (additive API)
+
+The existing SIC runner above is unchanged.  New architectures can instead use
+`run_model_agnostic_counterfactuals`, whose optimizer depends only on a small
+adapter contract: create an initial optimization state, classify that state,
+reconstruct input-shaped signals, and classify reconstructed inputs.  Optional
+validity constraints are also supplied by the adapter rather than hardcoded in
+the optimizer.
+
+The included SIC adapter preserves the old latent/joint behavior while the
+included Keras input adapter supports differentiable models without decoders.
+For example, the equivalent SIC v15 path is:
+
+```bash
+PYTHONPATH=src python -m eegproc.model_explainability.run_model_agnostic_counterfactuals \
+  --model /path/to/loso_target_0_zero_shot.keras \
+  --adapter eegproc.model_explainability.sic_counterfactual_adapter:create_sic_adapter \
+  --adapter-config '{"model_module":"eegproc.deep_learning.joint_architectures.SICModelv15.sic_model","decoder_mode":"joint"}' \
+  --data-loader eegproc.model_explainability.sic_counterfactual_adapter:load_sic_raw_trials \
+  --data-config '{"raw_eeg_npy":"datasets/dreamer_eeg.npy","raw_labels_npy":"datasets/dreamer_labels.npy","dataset":"dreamer","label_dimension":"arousal","fs":128,"window_sec":1,"window_normalization":"global_rms"}' \
+  --subject-id 0 --trial-id 0 \
+  --max-steps 20 \
+  --report-constraint vcsc \
+  --out-dir runs/counterfactuals/adapter_sic_v15_subject0_trial0
+```
+
+`--report-constraint vcsc` computes VCSC only for the final reference and
+counterfactual, avoiding its substantial per-step cost. To optimize with that
+constraint, use `--constraint-weight vcsc=WEIGHT` instead.
+
+For an arbitrary differentiable Keras classifier, provide a prepared trials NPZ
+and use input-space optimization:
+
+```bash
+PYTHONPATH=src python -m eegproc.model_explainability.run_model_agnostic_counterfactuals \
+  --model /path/to/model.keras \
+  --adapter eegproc.model_explainability.counterfactual_adapter:create_keras_input_adapter \
+  --adapter-config '{"output_kind":"logits","registration_modules":["my_package.models"]}' \
+  --trials-npz /path/to/prepared_trials.npz \
+  --subject-id 0 --trial-id 0 \
+  --out-dir runs/counterfactuals/generic_input_model
+```
+
+External adapter and dataset-loader factories use `package.module:function`.
+The standard prepared NPZ keys are `features`, `subject_ids`, `trial_ids`, and
+optional `labels`. It may also carry `normalization_offset`,
+`normalization_scale`, `channel_names`, `band_names`, `channel_positions`,
+`feature_order`, and `signal_unit`.
+
+### Topographies in source units
+
+The metadata-aware SIC loader preserves each window's affine normalization
+transform. Results from the model-agnostic runner can therefore be plotted in
+the source array's units:
+
+```bash
+PYTHONPATH=src python -m \
+  eegproc.model_explainability.model_agnostic_counterfactual_topography \
+  runs/.../subject_0_trial_0/counterfactual.npz \
+  --branch joint --measure mean-absolute --physical-units --no-show
+```
+
+The plot says `source signal units` unless `signal_unit` was supplied by the
+dataset loader or with `--signal-unit`. Label it `µV` only when the source
+array's provenance confirms microvolts. The original topography command and
+its normalized-unit behavior are unchanged.
+
 ## Objective and gradient path
 
 For original trial `x`, encode once to `z`, then initialize `z_prime = z`. The

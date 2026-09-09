@@ -354,19 +354,38 @@ class CounterfactualLoss:
         #to the target/latent/decoded terms instead of growing with pair count.
         return tf.cast(tf.reduce_mean(weight * penalty), x_prime.dtype)
 
-    def central_loss(self, *, logits, target_class, z_prime, z, x, decoder):
+    def central_loss(
+        self,
+        *,
+        logits,
+        target_class,
+        z_prime,
+        z,
+        x,
+        decoder,
+        target_loss_override=None,
+        target_components=None,
+    ):
         """Return (loss_terms, reconstructions) for one optimization step.
 
         loss_terms contains total, the four unweighted terms, their four
-        weighted contributions, and decoded_<path> distances. All are
-        scalar tensors, allowing a single GradientTape to differentiate total.
-        The caller handles optimization, finite checks, logging, and saving.
+        weighted contributions, and decoded_<path> distances. All are scalar
+        tensors, allowing a single GradientTape to differentiate total. A
+        model-aware optimizer may replace the default confidence target with
+        a pre-gradient focal/VC component and supply separately logged target
+        components. The caller handles optimization, finite checks, logging,
+        and saving.
         """
         decoded, reconstructions, branch_distances = self.decoded_distance(
             z_prime, x, decoder
         )
+        target = (
+            self.target_loss(logits, target_class)
+            if target_loss_override is None
+            else tf.cast(target_loss_override, logits.dtype)
+        )
         terms = {
-            "target": self.target_loss(logits, target_class),
+            "target": target,
             "latent": self.latent_distance(z_prime, z),
             "decoded": decoded,
             "physiological": tf.add_n(
@@ -378,9 +397,17 @@ class CounterfactualLoss:
             f"weighted_{name}": getattr(self, f"{name}_weight") * value
             for name, value in terms.items()
         }
-        return {
+        result = {
             "total": tf.add_n(list(weighted.values())),
             **terms,
             **weighted,
             **{f"decoded_{name}": value for name, value in branch_distances.items()},
-        }, reconstructions
+        }
+        if target_components:
+            overlap = set(result).intersection(target_components)
+            if overlap:
+                raise ValueError(
+                    f"target_components collide with loss terms: {sorted(overlap)}"
+                )
+            result.update(target_components)
+        return result, reconstructions

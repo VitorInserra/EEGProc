@@ -122,6 +122,68 @@ def test_joint_decoder_mode_is_exposed_by_cli():
     assert tuple(action.choices) == ("branches", "joint")
 
 
+def test_learning_rate_decay_is_exposed_by_cli():
+    action = next(
+        action
+        for action in build_parser()._actions
+        if action.dest == "learning_rate_decay"
+    )
+    assert action.default == 1.0
+
+
+def test_target_loss_component_is_exposed_by_cli():
+    action = next(
+        action
+        for action in build_parser()._actions
+        if action.dest == "target_loss_component"
+    )
+    assert action.default == "confidence"
+    assert tuple(action.choices) == ("confidence", "focal", "vc", "focal_vc")
+
+
+def test_target_loss_is_decomposed_before_gradient(tiny_joint_model):
+    inputs = tf.random.normal((1, 2, 4, 42), seed=13)
+    optimizer = CounterfactualOptimizer(
+        tiny_joint_model,
+        target_loss_component="focal_vc",
+        max_steps=0,
+        decoder_mode="joint",
+    )
+    latent = tiny_joint_model.get_encoder_features(inputs)["window_features"]
+    embedding, logits = optimizer._classification_state(latent)
+    selected, components = optimizer._target_components(embedding, logits, 1)
+
+    assert float(selected.numpy()) == pytest.approx(
+        float(
+            (
+                components["target_focal_component"]
+                + components["target_vc_component"]
+            ).numpy()
+        )
+    )
+    result = optimizer.optimize(inputs, target_class=1)
+    row = result["history"][0]
+    assert row["target_loss_component"] == "focal_vc"
+    assert row["target"] == pytest.approx(
+        row["target_focal_component"] + row["target_vc_component"]
+    )
+
+
+def test_learning_rate_decay_is_recorded_per_step(tiny_joint_model):
+    inputs = tf.random.normal((1, 2, 4, 42), seed=9)
+    result = CounterfactualOptimizer(
+        tiny_joint_model,
+        learning_rate=0.2,
+        learning_rate_decay=0.5,
+        max_steps=2,
+        decoder_mode="joint",
+    ).optimize(inputs)
+
+    assert [row["learning_rate"] for row in result["history"]] == pytest.approx(
+        [0.2, 0.1, 0.05]
+    )
+
+
 def test_vcsc_settings_are_exposed_by_cli():
     actions = {action.dest: action for action in build_parser()._actions}
 

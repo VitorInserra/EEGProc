@@ -1,0 +1,74 @@
+{
+  "subject_id": 0,
+  "trial_id": 0,
+  "target_class": 0,
+  "decoder_mode": "joint",
+  "joint_reconstruction_alpha": 0.5,
+  "required_target_probability": 0.8,
+  "prediction_rule": "argmax",
+  "original": {
+    "probabilities": [
+      0.4993746280670166,
+      0.5006254315376282
+    ],
+    "predicted_class": 1,
+    "target_probability": 0.4993746280670166,
+    "success": false
+  },
+  "latent_counterfactual": {
+    "probabilities": [
+      0.5145490169525146,
+      0.4854510426521301
+    ],
+    "predicted_class": 0,
+    "target_probability": 0.5145490169525146,
+    "success": false
+  },
+  "decoded_trials": {
+    "joint": {
+      "original_reconstruction": {
+        "probabilities": [
+          0.4999844431877136,
+          0.5000155568122864
+        ],
+        "predicted_class": 1,
+        "target_probability": 0.4999844431877136,
+        "success": false
+      },
+      "counterfactual": {
+        "probabilities": [
+          0.5002835392951965,
+          0.49971652030944824
+        ],
+        "predicted_class": 0,
+        "target_probability": 0.5002835392951965,
+        "success": false
+      },
+      "original_reconstruction_mse": 0.5422641038894653,
+      "counterfactual_to_original_mse": 0.5333868265151978,
+      "decoded_change_mse": 0.00031239722738973796,
+      "vcsc_original_reconstruction": 13.722040176391602,
+      "vcsc_counterfactual": 13.558253288269043,
+      "vcsc_delta": -0.1637868881225586
+    }
+  },
+  "selected_losses": {
+    "total": 0.49466079473495483,
+    "target": 0.4413209557533264,
+    "latent": 1.1499437277961988e-05,
+    "decoded": 0.5333868265151978,
+    "physiological": 13.558253288269043,
+    "weighted_target": 0.4413209557533264,
+    "weighted_latent": 1.1499437277961988e-06,
+    "weighted_decoded": 0.053338684141635895,
+    "weighted_physiological": 0.0,
+    "decoded_joint": 0.5333868265151978
+  },
+  "selected_step": 5,
+  "steps_completed": 5,
+  "stop_reason": "max_steps",
+  "elapsed_seconds": 705.3108734170091,
+  "physiological_validity": 13.558253288269043,
+  "physiological_constraint_enforced": false,
+  "true_class": 1
+}

@@ -19,6 +19,13 @@ def _nonnegative_float(value):
     return number
 
 
+def _decay_float(value):
+    number = float(value)
+    if not math.isfinite(number) or not 0 < number <= 1:
+        raise argparse.ArgumentTypeError("must be finite and in (0, 1]")
+    return number
+
+
 def _nonnegative_int(value):
     number = int(value)
     if number < 0:
@@ -86,7 +93,28 @@ def build_parser():
         help="Default: opposite original predicted class; binary models only.",
     )
     parser.add_argument("--target-probability", type=_positive_float, default=0.8)
+    parser.add_argument(
+        "--target-loss-component",
+        choices=("confidence", "focal", "vc", "focal_vc"),
+        default="confidence",
+        help=(
+            "Classification-side objective differentiated through the frozen "
+            "SIC head: confidence keeps the existing probability-threshold "
+            "hinge; focal selects only the checkpoint-weighted focal term; "
+            "vc selects only the checkpoint-weighted auxiliary VC terms; "
+            "focal_vc selects their sum (default: confidence)."
+        ),
+    )
     parser.add_argument("--learning-rate", type=_positive_float, default=0.01)
+    parser.add_argument(
+        "--learning-rate-decay",
+        type=_decay_float,
+        default=1.0,
+        help=(
+            "Per-update exponential learning-rate multiplier in (0, 1]; "
+            "1 keeps the learning rate constant (default: 1)."
+        ),
+    )
     parser.add_argument("--max-steps", type=_nonnegative_int, default=200)
     parser.add_argument("--gradient-clip-norm", type=_positive_float, default=5.0)
     parser.add_argument("--target-weight", type=_positive_float, default=1.0)
