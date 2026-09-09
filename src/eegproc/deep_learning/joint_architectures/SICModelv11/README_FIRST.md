@@ -1,12 +1,12 @@
 # SIC MTLFuseNet-style 3D-CNN update
 
-SIC builder API version 16 replaces the within-window temporal BiLSTM with a
+SIC builder API version 17 replaces the within-window temporal BiLSTM with a
 spatio-temporal 3D-CNN while retaining the trial-level BiGRU classifier:
 
 ```text
 channel-major 3-band EEG, one-second windows (128, 42)
     -> parallel GCN-GRU and MTLFuseNet-style 3D-CNN encoders
-    -> direct per-timestep feature concatenation
+    -> direct per-window feature concatenation
     -> ordered full-trial BiGRU sequence
     -> one VariationalClassifier logits head
 ```
@@ -16,9 +16,11 @@ windowing, producing the required channel-major `(128, 42)` inputs. The 3D-CNN
 sums those bands into MTLFuseNet's raw-like 4--30 Hz spatio-temporal signal and
 restores each timestep's 14 Emotiv electrodes to the same 9x9 scalp layout.
 The input to `Conv3D` is `(time, grid-row, grid-column, 1)`. Convolutions span
-time and both scalp axes; pooling acts only on the scalp axes. Spatial global
-average pooling therefore produces `(128, cnn3d_filters[-1])` without removing
-or reordering time.
+time and both scalp axes, and global averaging produces one
+`cnn3d_filters[-1]` embedding per one-second window. The graph branch likewise
+computes window-level differential entropy before its GCN and spectral GRU.
+The trial BiGRU therefore receives 60 ordered window embeddings instead of
+7,680 raw-timestep embeddings for a standard DREAMER trial.
 
 The default branch is:
 

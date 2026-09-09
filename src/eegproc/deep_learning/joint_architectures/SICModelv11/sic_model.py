@@ -141,7 +141,7 @@ except ImportError:
     )
 
 
-SIC_BUILDER_API_VERSION = 16
+SIC_BUILDER_API_VERSION = 17
 JOINT_V6_BUILDER_API_VERSION = SIC_BUILDER_API_VERSION
 
 
@@ -1241,12 +1241,9 @@ class SICModel(tf.keras.Model):
         n_windows=None,
         training: bool = False,
     ):
-        # Keep every encoded timestep. In trial mode, restore the window axis
-        # and then merge only the adjacent window/time axes, which preserves
-        # chronological order exactly:
-        #   (batch * windows, time, features)
-        #       -> (batch, windows, time, features)
-        #       -> (batch, windows * time, features)
+        # Keep every encoder step. SIC's MTLFuseNet-style encoders emit one
+        # step per window, so trial mode restores the window axis and preserves
+        # chronological window order exactly.
         if self.classification_level == "window":
             window_feature_sequences = flat_features
             classifier_sequence = flat_features
@@ -2600,15 +2597,15 @@ def build_sic_model(
     if use_gcn_gru_branch:
         graph_encoder = GCNMTLEncoder(
             timesteps=int(timesteps),
-            # GCNMTLEncoder retains these historical constructor arguments.
-            # A fixed factor of one and no pools disable all downsampling;
-            # neither value is exposed as a SIC hyperparameter.
-            t_down=1,
+            # SIC fuses one embedding per EEG window. Differential entropy
+            # collapses raw timesteps before the spectral GRU, preventing the
+            # pathological batch*time expansion seen in the GPU smoke run.
+            t_down=int(timesteps),
             adjacency=adjacency,
             n_channels=int(n_channels),
             n_bands=int(n_bands),
             gcn_units=gcn_units,
-            temporal_pool_sizes=(),
+            temporal_pool_sizes=(int(timesteps),),
             emb_dim=None,
             dropout=float(gcn_dropout),
             activation=str(gcn_activation),
@@ -2616,6 +2613,7 @@ def build_sic_model(
             use_spectral_gru=True,
             spectral_gru_units=int(spectral_gru_units),
             spectral_gru_dropout=float(spectral_gru_dropout),
+            window_level_spectral_features=True,
             graph_add_self_loops=bool(graph_add_self_loops),
             graph_symmetrize=bool(graph_symmetrize),
             graph_epsilon=float(graph_epsilon),
@@ -2644,9 +2642,9 @@ def build_sic_model(
             timesteps=int(timesteps),
             n_channels=int(n_channels),
             n_bands=int(n_bands),
-            t_down=1,
+            t_down=int(timesteps),
             gcn_units=gcn_units,
-            temporal_pool_sizes=(),
+            temporal_pool_sizes=(int(timesteps),),
             adjacency=adjacency,
             emb_dim=int(emb_dim),
             dropout=float(decoder_dropout),
@@ -2802,7 +2800,7 @@ def build_sic_model(
     if gcn_gru_decoder is not None:
         _ = gcn_gru_decoder(
             tf.zeros(
-                (1, int(timesteps), int(spectral_gru_units)),
+                (1, 1, int(spectral_gru_units)),
                 dtype=tf.float32,
             ),
             training=False,
@@ -2810,7 +2808,7 @@ def build_sic_model(
     if cnn3d_decoder is not None:
         _ = cnn3d_decoder(
             tf.zeros(
-                (1, int(timesteps), int(cnn3d_filters[-1])),
+                (1, 1, int(cnn3d_filters[-1])),
                 dtype=tf.float32,
             ),
             training=False,

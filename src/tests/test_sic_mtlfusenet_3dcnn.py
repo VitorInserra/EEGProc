@@ -38,7 +38,7 @@ def test_channel_major_bands_are_summed_and_scattered_to_mtl_grid():
     assert np.count_nonzero(grid) == len(DREAMER_ELECTRODE_GRID)
 
 
-def test_encoder_preserves_time_and_backpropagates():
+def test_encoder_produces_one_window_embedding_and_backpropagates():
     encoder = _small_encoder()
     inputs = tf.random.normal((2, 8, 42), seed=7)
 
@@ -47,7 +47,7 @@ def test_encoder_preserves_time_and_backpropagates():
         loss = tf.reduce_sum(outputs)
     gradients = tape.gradient(loss, encoder.trainable_variables)
 
-    assert outputs.shape == (2, 8, 8)
+    assert outputs.shape == (2, 1, 8)
     assert gradients
     assert all(gradient is not None for gradient in gradients)
 
@@ -74,10 +74,10 @@ def test_sic_fuses_gcn_gru_and_cnn3d_sequences():
     features = model.get_encoder_features(inputs)
 
     assert probabilities.shape == (2, 2)
-    assert features["gcn_gru_features"].shape == (4, 8, 6)
-    assert features["cnn3d_features"].shape == (4, 8, 8)
-    assert features["combined_feature_sequence"].shape == (4, 8, 14)
-    assert features["classifier_sequence"].shape == (2, 16, 14)
+    assert features["gcn_gru_features"].shape == (4, 1, 6)
+    assert features["cnn3d_features"].shape == (4, 1, 8)
+    assert features["combined_feature_sequence"].shape == (4, 1, 14)
+    assert features["classifier_sequence"].shape == (2, 2, 14)
 
 
 def test_each_active_branch_reconstructs_independently():

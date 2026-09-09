@@ -256,6 +256,7 @@ class GCNMTLEncoder(BaseEncoder):
         use_spectral_gru: bool = True,
         spectral_gru_units: int = 384,
         spectral_gru_dropout: float = 0.0,
+        window_level_spectral_features: bool = False,
         graph_add_self_loops: bool = True,
         graph_symmetrize: bool = True,
         graph_epsilon: float = 1e-8,
@@ -331,6 +332,7 @@ class GCNMTLEncoder(BaseEncoder):
         self.use_spectral_gru = bool(use_spectral_gru)
         self.spectral_gru_units = int(spectral_gru_units)
         self.spectral_gru_dropout = float(spectral_gru_dropout)
+        self.window_level_spectral_features = bool(window_level_spectral_features)
         self.graph_add_self_loops = bool(graph_add_self_loops)
         self.graph_symmetrize = bool(graph_symmetrize)
         self.graph_epsilon = float(graph_epsilon)
@@ -429,6 +431,21 @@ class GCNMTLEncoder(BaseEncoder):
     ) -> tf.Tensor:
         # (batch, time, channels, 1)
         band_x = x[..., band_index : band_index + 1]
+
+        if self.window_level_spectral_features:
+            # MTLFuseNet's graph branch consumes one differential-entropy
+            # feature per channel/band/window rather than treating every raw
+            # EEG sample as an independent spectral-GRU batch element.
+            variance = tf.math.reduce_variance(band_x, axis=1, keepdims=True)
+            variance = tf.maximum(
+                variance,
+                tf.cast(tf.keras.backend.epsilon(), variance.dtype),
+            )
+            normal_entropy_scale = tf.cast(
+                2.0 * np.pi * np.e,
+                variance.dtype,
+            )
+            band_x = 0.5 * tf.math.log(normal_entropy_scale * variance)
 
         for gcn, bn, dropout in zip(
             self.shared_gcn_layers,
@@ -567,6 +584,9 @@ class GCNMTLEncoder(BaseEncoder):
                 "use_spectral_gru": self.use_spectral_gru,
                 "spectral_gru_units": self.spectral_gru_units,
                 "spectral_gru_dropout": self.spectral_gru_dropout,
+                "window_level_spectral_features": (
+                    self.window_level_spectral_features
+                ),
                 "graph_add_self_loops": self.graph_add_self_loops,
                 "graph_symmetrize": self.graph_symmetrize,
                 "graph_epsilon": self.graph_epsilon,

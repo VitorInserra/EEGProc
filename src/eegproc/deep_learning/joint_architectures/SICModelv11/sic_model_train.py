@@ -31,9 +31,9 @@ complete trials and applies one persistent outer update.
 
 SIC uses independent parallel deterministic branches. The complete GCN-GRU and
 MTLFuseNet-style 3D-CNN feature vectors are concatenated without an encoder
-projection or bottleneck. In trial mode, every encoded timestep from every
-ordered window is passed to a GRU/BiGRU sequence summarizer; no temporal or
-cross-window mean is taken. That recurrent state goes directly to the sole
+projection or bottleneck. In trial mode, one embedding from every ordered EEG
+window is passed to a GRU/BiGRU sequence summarizer; no cross-window mean is
+taken. That recurrent state goes directly to the sole
 VariationalClassifier logits head and to the subject adversary. Optional
 deterministic decoders reconstruct the input independently from the GCN-GRU and
 3D-CNN feature sequences. There is no dense classifier stack, encoder VAE, or

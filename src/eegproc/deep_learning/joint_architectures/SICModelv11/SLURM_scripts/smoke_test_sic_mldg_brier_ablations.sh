@@ -245,7 +245,7 @@ print(json.dumps({
     "mi_max_observations": 15000,
 
     # MTLFuseNet-style spatio-temporal branch. Conv3D operates over time and
-    # the 9x9 electrode grid; spatial pooling preserves all 128 time steps.
+    # the 9x9 electrode grid and returns one embedding per one-second window.
     "cnn3d_filters": {"fixed": [32, 64, 128]},
     "cnn3d_temporal_kernel_size": 7,
     "cnn3d_spatial_kernel_size": 3,

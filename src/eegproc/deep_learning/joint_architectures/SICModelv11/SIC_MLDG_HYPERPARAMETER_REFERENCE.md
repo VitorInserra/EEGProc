@@ -1,6 +1,6 @@
 # SIC 3D-CNN + MLDG hyperparameter reference
 
-This reference matches SIC builder API version 16 and the updated smoke/full
+This reference matches SIC builder API version 17 and the updated smoke/full
 Longleaf workers. The population model is trained with complete, ordered EEG
 trials and evaluated with LOSO zero-shot prediction followed by few-shot target
 calibration.

@@ -7,9 +7,8 @@ SIC stores each timestep in channel-major, band-minor order::
 This layer sums the theta/alpha/beta waveforms back into the raw-like 4--30 Hz
 signal used by MTLFuseNet's spatio-temporal branch, restores the 14 electrodes
 to its 9 x 9 scalp grid, and applies convolutions over time and both scalp axes.
-Only the spatial axes are pooled, so the output remains a feature sequence
-with one vector per input timestep and can be concatenated directly with the
-GCN-GRU branch.
+The final global average produces one feature vector per EEG window, matching
+the window-level GCN-GRU representation used for trial-sequence fusion.
 """
 
 from __future__ import annotations
@@ -52,10 +51,8 @@ class MTLFuseNet3DCNNEncoder(tf.keras.layers.Layer):
     """Encode channel-band waveforms with spatio-temporal 3D convolutions.
 
     Parameters are intentionally compact relative to the paper's 2D VAE
-    stack. SIC passes full 128-sample sequences to every encoder and later
-    joins all windows into a trial sequence, so preserving time here is more
-    useful (and substantially less memory-intensive) than flattening the
-    complete 9 x 9 x 128 volume.
+    stack. SIC passes one-second waveforms to this encoder and joins the
+    resulting window embeddings into the trial sequence.
     """
 
     def __init__(
@@ -236,11 +233,11 @@ class MTLFuseNet3DCNNEncoder(tf.keras.layers.Layer):
             if pooling is not None:
                 x = pooling(x)
             x = dropout(x, training=training)
-        # Retain time; aggregate only the two spatial dimensions.
-        return tf.reduce_mean(x, axis=(2, 3))
+        # MTLFuseNet-style one-vector-per-window spatio-temporal embedding.
+        return tf.expand_dims(tf.reduce_mean(x, axis=(1, 2, 3)), axis=1)
 
     def compute_output_shape(self, input_shape):
-        return (input_shape[0], input_shape[1], self.output_dim)
+        return (input_shape[0], 1, self.output_dim)
 
     def get_config(self):
         config = super().get_config()

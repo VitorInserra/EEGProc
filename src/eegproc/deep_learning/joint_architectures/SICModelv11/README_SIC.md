@@ -39,7 +39,10 @@ flowchart TD
 
 The graph branch constructs a mutual-information adjacency matrix from source-training data only. The held-out LOSO subject is never used to estimate this graph.
 
-Band-separated graph convolutions extract spatial/spectral relationships and a spectral GRU combines the band representations. Its output width is
+Window-level differential entropy is computed for each channel and band.
+Band-separated graph convolutions extract spatial/spectral relationships and a
+spectral GRU combines the three band representations once per EEG window. Its
+output width is
 
 $$
 d_g=\texttt{spectral\_gru\_units}.
@@ -53,9 +56,9 @@ The loader filters each complete trial into theta/alpha/beta before windowing,
 then stores those waveforms in channel-major, band-minor order. The 3D-CNN sums
 the three bands into the raw-like 4--30 Hz signal used by MTLFuseNet's
 spatio-temporal branch and scatters each timestep onto the DREAMER 9x9
-electrode grid. Its convolutions span time and both scalp axes. Max pooling and
-final averaging act only on the two spatial axes, so all 128 time samples
-remain aligned with the graph branch.
+electrode grid. Its convolutions span time and both scalp axes. Final global
+averaging produces one embedding per EEG window, aligned with the graph
+branch's one window-level embedding.
 The branch width is the final convolution's filter count:
 
 $$
@@ -68,7 +71,8 @@ of batch normalization because subject-disjoint batches can be small.
 
 ### Direct concatenation
 
-After temporal alignment, the complete branch vectors are concatenated along the feature axis:
+For each EEG window, the complete branch vectors are concatenated along the
+feature axis:
 
 $$
 h_{\text{joint},t}=[h_{\text{GCN-GRU},t};h_{\text{3D-CNN},t}],
