@@ -60,3 +60,12 @@ always_document_param_types = True
 # }
 
 myst_enable_extensions = ["colon_fence", "deflist"]
+
+# Package ``__init__`` modules re-export their submodules' public names.
+# Document each object once, where it is defined, so cross-references such as
+# ``EEGFrame`` resolve to a single target.
+autodoc_default_options = {
+    "members": True,
+    "show-inheritance": True,
+    "ignore-module-all": True,
+}

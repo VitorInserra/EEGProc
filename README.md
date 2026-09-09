@@ -1,81 +1,113 @@
-![Coverage badge](coverage.svg)
+# EEGProc
 
-# EEGProc: EEG Preprocessing and Featurization Library
+Preprocessing, featurization, and subject-wise cross-validation for EEG.
 
-EEGProc is a fully vectorized library designed for preprocessing and extracting features from EEG (Electroencephalogram) data. This research-born library is optimized for performance and ease of use, making it suitable for researchers and developers working in the field of neuroscience, biomedical engineering, and machine learning.
+EEGProc is built for the awkward part of EEG machine learning: getting from raw
+recordings to features to an honest, subject-held-out evaluation, without writing
+the windowing and fold-splitting glue yourself. It is vectorized over pandas
+DataFrames and has no opinion about your model — you supply a Keras model builder.
 
-## Documentation
-
-[Click here to read the documentation](https://eego-unc.github.io/EEGProc/)
-
-## Features
-
-- **Preprocessing**: Includes functions for filtering, artifact removal, and normalization of EEG signals.
-- **Featurization**: Extracts meaningful features from EEG data, such as power spectral density, band power, and more.
-- **Deep Learning**: Includes experiment-ready training utilities for supervised and unsupervised EEG models under the deep learning package.
-- **Vectorized Operations**: Fully vectorized implementation ensures high performance and scalability for working with pandas dataframes.
-- **Ease of Integration**: Designed to integrate seamlessly with existing Python workflows.
-
-## Deep Learning
-
-The repository also includes a compact deep learning toolkit for EEG experiments, with modules for supervised and unsupervised training, joint architectures, dataset preparation, and experiment execution under the deep learning package.
-
-## Installation
-
-To install EEGProc, you can use pip:
+## Install
 
 ```bash
-pip install eegproc
+pip install eegproc                    # preprocessing + featurization
+pip install "eegproc[deep-learning]"   # adds the cross-validation stack (TensorFlow)
 ```
 
-Alternatively, you can clone the repository and install the required dependencies manually:
+The base install deliberately does **not** pull in TensorFlow. If you only need
+filtering and features, you do not pay for a deep-learning runtime.
 
-```bash
-# Clone the repository
-git clone https://github.com/VitorInserra/EEGProc.git
+Requires Python 3.10 or newer.
 
-# Navigate to the project directory
-cd EEGProc
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-## Usage
-
-### Preprocessing EEG Data
+## Featurization
 
 ```python
 import pandas as pd
-from eegproc import bandpass_filter
+from eegproc import bandpass_filter, psd_bandpowers, shannons_entropy, FREQUENCY_BANDS
 
-# Example: Preprocess raw EEG data
-data: pd.DataFrame = ...  # Load your raw EEG data as a dataframe
-mask = (data['patient_index'] == 0) & (data['video_index'] == 17)
-eeg_df = data.loc[mask, :]
-bandpass_filtered_data: pd.DataFrame = bandpass_filter(eeg_df)
+raw = pd.read_csv("my_eeg.csv")        # one column per electrode
+fs = 128
+
+clean = bandpass_filter(raw, fs, bands=FREQUENCY_BANDS)   # -> AF3_alpha, AF3_theta, ...
+psd = psd_bandpowers(clean, fs, bands=FREQUENCY_BANDS)    # one row per window
+entropy = shannons_entropy(psd)                           # -> AF3_entropy, F7_entropy
 ```
 
-### Extracting Features
+Featurizers compose in a pipeline: the band-energy functions consume a filtered
+signal, and the entropy functions consume the corresponding energy table.
+
+| Function | Consumes | Emits |
+|---|---|---|
+| `bandpass_filter` | raw signal | `{channel}_{band}` |
+| `psd_bandpowers` | filtered signal | `{channel}_{band}` |
+| `shannons_entropy` | PSD table | `{channel}_entropy` |
+| `hjorth_params` | filtered signal | `{channel}_activity`, `_mobility`, `_complexity` |
+| `wavelet_band_energy` | raw signal | `{channel}_{band}_wenergy` |
+| `wavelet_entropy` | wavelet energy | `{channel}_wentropy` |
+| `imf_band_energy` | raw signal | `{channel}_{band}_imfenergy` |
+| `imf_entropy` | IMF energy | `{channel}_imfentropy` |
+
+## Cross-validation
+
+Subject-wise evaluation takes a **tidy table**: your feature columns plus
+`subject`, `trial`, and a label column. Trials never straddle a fold, and each
+subject's normalization is computed from that subject alone.
 
 ```python
-from eegproc import psd
+from eegproc import feature_grouped_by_metadata, psd_bandpowers
+from eegproc.deep_learning.cross_validation import cross_validate_dataframe
 
-# Example: get Power Spectral Density from a bandpass filtered dataframe
-psd_data: pd.DataFrame = psd(bandpass_filitered_data)
+features = feature_grouped_by_metadata(
+    eeg_df=raw,                                    # has subject/trial columns
+    target_function=psd_bandpowers,
+    fs=128,
+    group_by_metadata_columns=["subject", "trial"],
+)
+features = features.merge(labels, on=["subject", "trial"])
+
+results = cross_validate_dataframe(
+    features, build_model, strategy="loso", fs=128, label_column="label",
+)
+
+for row in results["user_metrics"]:
+    print(row["subject_id"], row["accuracy"])      # "P07" 0.71
 ```
 
-## File Structure
+Results are reported against your own subject identifiers, not positional indices.
 
-- `src/eegproc/`
-  - `preprocessing.py`: Contains preprocessing functions.
-  - `featurization.py`: Contains feature extraction functions.
-- `requirements.txt`: Lists the dependencies required for the project.
+Available strategies: `loso` (leave-one-subject-out), `fixed_loso` (a single fixed
+configuration), `subject_calibration` (few-shot adaptation to a held-out subject),
+and `nested_lnso` (nested leave-N-subjects-out).
+
+Sessions need no special support: `trial_columns=("session", "trial")` scopes
+trials per session, and `subject_columns=("subject", "session")` gives
+leave-one-session-out through the same code path.
+
+If you already hold NumPy arrays, `loso_cv` and friends take them directly.
+
+## Package layout
+
+- `eegproc.preprocessing` — filtering, detrending, notch, band decomposition
+- `eegproc.featurization` — spectral, Hjorth, wavelet and IMF features
+- `eegproc.data` — the tidy schema and the windowing assembler (no TensorFlow)
+- `eegproc.deep_learning.cross_validation` — the cross-validation strategies
+- `eegproc.plotting` — `plot_eeg_features`
+
+## Scope
+
+EEGProc gives you data preparation and evaluation. It does not ship model
+architectures — you pass a builder that returns a compiled Keras model, and the
+cross-validators handle folds, windowing, thresholds, calibration and reporting.
+
+## Documentation
+
+<https://eego-unc.github.io/EEGProc/>
 
 ## Contributing
 
-Contributions are welcome! If you have ideas for new features or improvements, feel free to open an issue or submit a pull request.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Changes are documented in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-This project is licensed under the GPLv2 License. See the `LICENSE` file for details.
+GPLv2. See [LICENSE](LICENSE).

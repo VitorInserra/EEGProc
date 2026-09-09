@@ -5,22 +5,32 @@ from typing import Mapping, Sequence
 import numpy as np
 import tensorflow as tf
 
-from .cross_val import (
-    _CLASSIFICATION_METRICS,
-    HeldOutUserOracleMetrics as _CrossValHeldOutUserOracleMetrics,
-    _aggregate_window_probabilities_by_trial,
+from .cross_validation.arrays import (
     _as_numpy_1d,
-    _classification_metrics,
-    _decoder_reconstruction_scores,
-    _direct_trial_aggregation,
-    _extract_classifier_output,
     _is_trial_tensor,
+)
+from .cross_validation.constants import (
+    _CLASSIFICATION_METRICS,
+)
+from .cross_validation.probabilities import (
+    _extract_classifier_output,
     _normalize_decision_thresholds,
     _predict_labels,
     _predict_probabilities,
-    _probability_log_loss,
-    _prediction_diagnostic_summary,
     _to_probabilities,
+)
+from .cross_validation.aggregation import (
+    _aggregate_window_probabilities_by_trial,
+    _direct_trial_aggregation,
+)
+from .cross_validation.metrics import (
+    _classification_metrics,
+    _decoder_reconstruction_scores,
+    _prediction_diagnostic_summary,
+    _probability_log_loss,
+)
+from .cross_validation.callbacks import (
+    HeldOutUserOracleMetrics as _CrossValHeldOutUserOracleMetrics,
 )
 
 
@@ -213,7 +223,7 @@ def _diagnostic_model_outputs(
 
     A grouped trial has shape ``(windows, timesteps, features)``. Consequently,
     a rank-4 diagnostic array can expand from a seemingly small outer batch to
-    thousands of EEG windows inside the SIC encoder. Process those arrays one
+    thousands of EEG windows inside the encoder. Process those arrays one
     complete trial at a time. This still evaluates every selected trial and
     preserves its full ordered window sequence; only the device scheduling is
     changed.
@@ -227,7 +237,7 @@ def _diagnostic_model_outputs(
     requested_batch_size = (
         len(X_array) if batch_size is None else int(batch_size)
     )
-    # Rank-4 SIC inputs are grouped trials, not ordinary independent windows.
+    # Rank-4 inputs are grouped trials, not ordinary independent windows.
     # One trial can already contain enough flattened windows to occupy most of
     # the GPU, so never combine multiple trials in a diagnostic forward pass.
     effective_batch_size = 1 if X_array.ndim == 4 else requested_batch_size
@@ -1259,11 +1269,3 @@ class CompactEpochLogger(tf.keras.callbacks.Callback):
                 ),
             )
 
-
-# cross_val imports this module lazily immediately before it creates its oracle
-# callback. Register the consolidated implementation there without requiring a
-# source change to cross_val.py, which keeps the existing public construction
-# path and callback ordering intact.
-_cross_val_module = sys.modules.get(_CrossValHeldOutUserOracleMetrics.__module__)
-if _cross_val_module is not None:
-    _cross_val_module.HeldOutUserOracleMetrics = HeldOutUserOracleMetrics

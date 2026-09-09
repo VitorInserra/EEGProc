@@ -8,6 +8,17 @@ from PyEMD import EMD
 from typing import Callable
 
 
+def _writable_1d(values: np.ndarray) -> np.ndarray:
+    """Return a writable view of ``values``, copying only when necessary.
+
+    pandas 3 hands back read-only arrays from ``to_numpy(copy=False)`` under
+    copy-on-write, and the Cython kernels in PyWavelets and PyEMD reject
+    read-only buffers ("buffer source array is read-only"). Copying only when
+    the buffer is actually read-only keeps the pandas 2 path allocation-free.
+    """
+    return values if values.flags.writeable else np.array(values, copy=True)
+
+
 # ---------------------------
 # SPECTRAL ENERGY and ENTROPY
 # ---------------------------
@@ -154,37 +165,64 @@ def shannons_entropy(
     eps: float = 1e-300,
     assume_log: bool | None = False,
 ) -> pd.DataFrame:
-    """Compute normalized Shannon spectral entropy per channel-band over windows.
+    """Measure how evenly a channel's energy is spread across its frequency bands.
 
-    Expects columns named ``{channel}_{band}`` where each ``band`` is a key in ``bands``
-    (bandpass_filter) may be used to achieve the expected table.
-    A PSD dataframe is expected as input, then
-    then it converts each windowed row (bin) of energy to probability.
-    Returns ``-Σplog2p/log2(#bins)`` in ``[0, 1]`` (NaN if insufficient bins or invalid totals).
+    Takes a **PSD table** (the output of :func:`psd_bandpowers`), not a raw signal.
+    Each row is one window; for every channel the band energies in that row are
+    normalized into a probability distribution and reduced to a single normalized
+    Shannon entropy in ``[0, 1]``. A value near 1 means energy is spread evenly
+    across bands; near 0 means it is concentrated in one band.
+
+    This is entropy *across* bands, one value per channel — not entropy within
+    each band. A channel with fewer than two band columns has no distribution to
+    measure and yields ``NaN``.
 
     Parameters
     ----------
-    df : pandas.DataFrame
-        Bandpass Filtered EEG dataframe. Numeric columns must be named like
-        ``{channel}_{band}`` (e.g., ``AF3_alpha``).
+    psd_df : pandas.DataFrame
+        PSD table with columns named ``{channel}_{band}``, where ``band`` is a key
+        of ``bands`` (e.g. ``AF3_alpha``). Columns that do not match this pattern
+        (metadata, indices) are ignored.
     bands : dict[str, tuple[float, float]], default=FREQUENCY_BANDS
-        Mapping from band name to inclusive frequency bounds (Hz).
+        Band vocabulary. Only the keys are used here, to decide which columns are
+        band columns and in what order they are read.
     eps : float, default=1e-300
-        Numerical guard to avoid log(0) and zero division.
+        Numerical guard against ``log(0)`` and division by zero.
+    assume_log : bool or None, default=False
+        Whether ``psd_df`` holds log-power. ``False`` treats values as linear power,
+        ``True`` exponentiates first, and ``None`` infers it from the fraction of
+        negative values.
 
     Returns
     -------
     pandas.DataFrame
-        One row per window. Columns are ``{channel}_{band}_entropy`` for each input band column.
+        One row per input row, indexed like ``psd_df``. One column per channel,
+        named ``{channel}_entropy``.
 
-    Raises
-    ------
-    ValueError
-        If no band-annotated columns are found, window is too small, or overlap invalid.
+    Examples
+    --------
+    >>> import pandas as pd
+    >>> from eegproc import psd_bandpowers, shannons_entropy, bandpass_filter
+    >>> clean = bandpass_filter(raw_df, fs=128)          # doctest: +SKIP
+    >>> psd = psd_bandpowers(clean, fs=128)              # doctest: +SKIP
+    >>> shannons_entropy(psd).columns.tolist()           # doctest: +SKIP
+    ['AF3_entropy', 'F7_entropy']
+
+    Energy spread evenly across bands is the maximum-entropy case:
+
+    >>> psd = pd.DataFrame({"AF3_delta": [1.0], "AF3_theta": [1.0],
+    ...                     "AF3_alpha": [1.0], "AF3_betaL": [1.0],
+    ...                     "AF3_betaH": [1.0], "AF3_gamma": [1.0]})
+    >>> float(shannons_entropy(psd)["AF3_entropy"].iloc[0])
+    1.0
 
     Notes
     -----
-    - Entropy is normalized by ``log2(count_of_band_bins)`` to yield values in ``[0, 1]``.
+    - Entropy is normalized by ``log2(n_bands)``, so results are comparable
+      across channels only when they share the same band vocabulary.
+    - Changed in v2: this function previously accepted a raw signal with
+      ``fs``/``window_sec``/``overlap`` and emitted ``{channel}_{band}_entropy``.
+      It now consumes a PSD table and emits ``{channel}_entropy``.
     """
     band_names = set(bands.keys())
     ch_to_cols: dict[str, list[str]] = {}
@@ -472,7 +510,7 @@ def wavelet_band_energy(
         row: dict[str, float] = {}
 
         for ch in df.columns:
-            y = win[ch].to_numpy(dtype=float, copy=False)
+            y = _writable_1d(win[ch].to_numpy(dtype=float, copy=False))
 
             coeffs = pywt.wavedec(y, wavelet=wavelet, level=L, mode=mode)
             wv_coeff_approx = coeffs[0]
@@ -677,7 +715,7 @@ def imf_band_energy(
     emd._imf_cumsums = {}
 
     for ch in df.columns:
-        y_full = df[ch].to_numpy(dtype=float, copy=False).astype(float, copy=False)
+        y_full = _writable_1d(df[ch].to_numpy(dtype=float, copy=False).astype(float, copy=False))
         imfs_full = emd.emd(y_full, max_imf=max_imf_needed)
         sq = imfs_full**2
         cum_sq = np.hstack(
@@ -789,65 +827,56 @@ def imf_entropy(
 def generate_all_features(
     raw_eeg_df: pd.DataFrame,
     fs: int,
-    bands: list[str] | None = FREQUENCY_BANDS,
+    bands: dict[str, tuple[float, float]] | None = FREQUENCY_BANDS,
     channels: list[str] | None = None,
     group_by_metadata_columns: list[str] | None = None,
-):
-    """
-    Compute a full feature set (PSD bandpowers, Shannon entropy, Hjorth parameters,
-    wavelet band energy/entropy, and IMF energy/entropy) for an EEG dataframe,
-    optionally grouped by metadata (e.g., ``patient_index``, ``video_index``).
+) -> pd.DataFrame:
+    """Compute the full feature set for an EEG table, optionally grouped by metadata.
 
-    Processing pipeline (per group)
-    -------------------------------
-    1) **Band-pass with notch clean**: Applies ``bandpass_filter`` to the group's EEG block:
-       0.5-45 Hz passband with a 60 Hz notch.
-    2) **Time/frequency-domain features on clean**:
-       - ``psd_bandpowers(clean, fs, bands=bands)``
-       - ``shannons_entropy(clean, fs, bands=bands)``
-       - ``hjorth_params(clean, fs)``
-    3) **Wavelet & IMF features on raw group block**:
-       - ``wavelet_band_energy(block, fs, bands=bands)`` → ``wavelet_entropy(...)``
-       - ``imf_band_energy(block, fs)`` → ``imf_entropy(...)``
-    4) **Concatenation**: Features (and metadata keys) are concatenated horizontally
-       for each window, then vertically across groups.
+    Runs the whole featurization pipeline per group and concatenates the result:
+    band-pass with notch, then PSD bandpowers, Shannon entropy, Hjorth parameters,
+    wavelet band energy and entropy, and IMF band energy and entropy.
 
     Parameters
     ----------
     raw_eeg_df : pandas.DataFrame
-        Input dataframe that may include both EEG columns and metadata columns.
-        For PSD bandpowers, EEG columns are expected to follow the
-        ``{channel}_{band}`` naming convention (e.g., ``AF3_alpha``).
+        Raw EEG, one column per electrode, plus any metadata columns.
     fs : int
-        Sampling frequency (Hz).
-    bands : list[str] | None, default=FREQUENCY_BANDS
-        List of band names to pass downstream (e.g., ``["delta","theta","alpha","beta","gamma"]``).
-        Must match the band keys used in your preprocessing and PSD functions.
-    channels : list[str] | None, default=None
-        If provided, restricts processing to the listed EEG columns.
-        **Important:** ensure that any columns required for grouping (specified in
-        ``group_by_metadata_columns``) remain present in the dataframe.
-    group_by_metadata_columns : list[str] | None, default=None
-        Column names to group by (e.g., ``["patient_index","video_index"]``).
-        If ``None``, the entire dataframe is processed as a single group.
+        Sampling rate in Hz.
+    bands : dict[str, tuple[float, float]], optional
+        Band vocabulary; defaults to :data:`FREQUENCY_BANDS`.
+    channels : list[str], optional
+        Restrict processing to these electrode columns. Grouping columns are
+        always retained.
+    group_by_metadata_columns : list[str], optional
+        Columns identifying a group, e.g. ``["subject", "trial"]``. When omitted,
+        the whole table is one group.
 
     Returns
     -------
     pandas.DataFrame
-        A dataframe with one row per (group, window). Columns include:
-        - The metadata columns listed in ``group_by_metadata_columns`` (if any), and
-        - Feature columns from PSD bandpowers, Shannon entropy, Hjorth parameters,
-          wavelet band energy/entropy, and IMF energy/entropy.
+        One row per (group, window): the metadata columns followed by every
+        feature column.
+
+    Examples
+    --------
+    >>> feats = generate_all_features(          # doctest: +SKIP
+    ...     raw_df, fs=128, group_by_metadata_columns=["subject", "trial"],
+    ... )
     """
     meta = list(group_by_metadata_columns or [])
 
     if channels is not None:
-        keep = [c for c in (metadata + channels) if c in raw_eeg_df.columns]
+        keep = [c for c in (meta + list(channels)) if c in raw_eeg_df.columns]
         raw_eeg_df = raw_eeg_df.loc[:, keep]
 
-    grouped = raw_eeg_df.groupby(group_by_metadata_columns, dropna=False, sort=False)
-    total_groups = max(1, grouped.ngroups)
+    if meta:
+        grouped = raw_eeg_df.groupby(meta, dropna=False, sort=False)
+    else:
+        grouped = [((), raw_eeg_df)]
+    total_groups = max(1, len(grouped) if hasattr(grouped, "__len__") else 1)
 
+    blocks: list[pd.DataFrame] = []
     for i, (keys, block) in enumerate(grouped, start=1):
         print(
             f"\r[EEGProc] Loading… {i/total_groups:6.2%}  ({i}/{total_groups})",
@@ -855,25 +884,35 @@ def generate_all_features(
             flush=True,
         )
 
-        clean = bandpass_filter(block, fs, bands=bands, low=0.5, high=45.0, notch_hz=60)
+        signal = block.drop(columns=meta, errors="ignore")
+        clean = bandpass_filter(signal, fs, bands=bands, low=0.5, high=45.0, notch_hz=60)
+
         psd = psd_bandpowers(clean, fs, bands=bands)
-        shannons = shannons_entropy(clean, fs, bands=bands)
+        shannons = shannons_entropy(psd, bands)
         hj = hjorth_params(clean, fs)
-        wt_energy = wavelet_band_energy(block, fs, bands=bands)
+        wt_energy = wavelet_band_energy(signal, fs, bands=bands)
         wt_entropy = wavelet_entropy(wt_energy, bands=bands)
-        imf_energy = imf_band_energy(block, fs)
-        metadata = pd.DataFrame()
-        for j in range(len(group_by_metadata_columns)):
-            metadata[group_by_metadata_columns[j]] = [keys[j]] * len(psd)
+        imf_energy = imf_band_energy(signal, fs)
         imf_entr = imf_entropy(imf_energy)
 
-        res_df = pd.concat(
-            [metadata, psd, shannons, hj, wt_energy, wt_entropy, imf_energy, imf_entr],
-            axis=1,
-        )
+        parts = [psd, shannons, hj, wt_energy, wt_entropy, imf_energy, imf_entr]
+        n_windows = min(len(part) for part in parts)
+        parts = [part.iloc[:n_windows].reset_index(drop=True) for part in parts]
+
+        if meta:
+            key_values = keys if isinstance(keys, tuple) else (keys,)
+            metadata = pd.DataFrame(
+                {name: [value] * n_windows for name, value in zip(meta, key_values)}
+            )
+            parts.insert(0, metadata)
+
+        blocks.append(pd.concat(parts, axis=1))
+
     print("\r[EEGProc] Loading… 100.00%  (done)".ljust(60))
 
-    return res_df
+    if not blocks:
+        return pd.DataFrame(columns=meta or None)
+    return pd.concat(blocks, axis=0, ignore_index=True)
 
 
 def feature_grouped_by_metadata(
@@ -895,7 +934,8 @@ def feature_grouped_by_metadata(
     eeg_df : pd.DataFrame
         Input with EEG columns (and possibly metadata columns).
     target_function : Callable
-        Function that takes (df, fs=..., bands=..., **kwargs) and returns a pd.DataFrame of features.
+        Function that takes ``(df, fs=..., bands=..., **kwargs)`` and returns a
+        :class:`pandas.DataFrame` of features.
         Example: `psd_bandpowers`.
     fs : int
         Sampling frequency to pass to `target_function`.
@@ -978,10 +1018,20 @@ def feature_grouped_by_metadata(
         )
         feats = target_function(block_for_fn, fs=fs, bands=bands, **fn_kwargs)
 
-        if meta and not feats.empty:
-            meta_df = pd.DataFrame({k: [v] * len(feats) for k, v in key_map.items()})
-            feats = pd.concat([meta_df, feats], axis=1)
-            feats = feats[meta + [c for c in feats.columns if c not in meta]]
+        if meta:
+            if feats.empty:
+                # A group can legitimately yield no features (e.g. no channel/band
+                # column matched). Keep the metadata columns so the concatenated
+                # result still has a usable schema instead of no columns at all.
+                feats = pd.DataFrame(
+                    columns=meta + [c for c in feats.columns if c not in meta]
+                )
+            else:
+                meta_df = pd.DataFrame(
+                    {k: [v] * len(feats) for k, v in key_map.items()}
+                )
+                feats = pd.concat([meta_df, feats], axis=1)
+                feats = feats[meta + [c for c in feats.columns if c not in meta]]
 
         out_frames.append(feats)
 

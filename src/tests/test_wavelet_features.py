@@ -177,7 +177,7 @@ def test_wenergy_equals_wavelet_energy_when_bands_match_subbands():
     # Compute total wavelet energy per window using pywt
     totals = []
     for start in range(0, len(df) - nperseg + 1, int(round(nperseg * (1.0 - overlap)))):
-        y = df["A1"].iloc[start : start + nperseg].to_numpy()
+        y = np.array(df["A1"].iloc[start : start + nperseg], dtype=float)
         coeffs = pywt.wavedec(y, wavelet="db4", level=L, mode="periodization")
         approx = coeffs[0]
         details = coeffs[1:]

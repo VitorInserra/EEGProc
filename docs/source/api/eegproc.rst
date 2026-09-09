@@ -12,6 +12,8 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   eegproc.data
+   eegproc.deep_learning
    eegproc.plotting
 
 Submodules

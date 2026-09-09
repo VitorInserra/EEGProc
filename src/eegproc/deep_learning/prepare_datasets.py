@@ -41,67 +41,70 @@ Output files are written to the current working directory (or --output_dir).
 
 Dataset structures
 ------------------
-DEAP (preprocessed Python version):
-    s01.dat ... s32.dat — each is a pickle dict with keys:
-        'data'   : (40, 40, 8064)  trials x (32 EEG + 8 peripheral) x samples
-                   We keep only the first 32 channels (EEG).
-                   Signals are already downsampled to 128 Hz and filtered 4-45 Hz.
-                   The first 3 seconds of each trial (baseline) are pre-removed
-                   in some versions; we trim to the last 60 s (7680 samples).
-        'labels' : (40, 4)  valence, arousal, dominance, liking  (1-9 scale)
 
-DREAMER (dreamer_joined.csv):
-    Long/tidy format — one row per EEG sample with columns:
-        subject_id, trial_id, segment, sample_idx,
-        AF3, F7, F3, FC5, T7, P7, O1, O2, P8, T8, FC6, F4, F8, AF4,
-        ECG1, ECG2, valence, arousal, dominance
-    This script groups by subject_id/trial_id, keeps the 14 EEG channels, and
-    selects only the contiguous stimulus segment for each subject/trial and
-    applies EEGProc's preprocessing.bandpass_filter to that stimulus recording.
-    The retained waveforms are theta (4-8 Hz), alpha (8-13 Hz), and
-    beta (13-30 Hz); delta and gamma are omitted. A 50 Hz notch is applied
-    before the band-pass filters. The 14 x 3 channel-band outputs are
-    flattened channel-major, for example AF3_theta, AF3_alpha, AF3_beta,
-    F7_theta, ... .
-    Baseline rows are excluded. Stimulus lengths vary; filtering is performed
-    on the full contiguous stimulus before taking its middle 60 s (7680 samples),
-    which reduces boundary artifacts in the retained data.
-    This three-band representation matches DREAMER's published 4-30 Hz
-    preprocessing range and avoids constructing a gamma feature from data that
-    may already have been low-pass filtered at 30 Hz.
-    NOTE: even though the CSV includes dominance, this converter writes labels
-    with shape (n_subjects, 18, 2) using [valence, arousal] only.
+::
 
-AMIGOS (joined CSV or legacy preprocessed Matlab version):
-    ``amigos_joined.csv`` is a long-form table with one row per EEG sample.
-    It contains ``subject_id``, ``trial_id``, ``sample_idx``, the 14 EEG
-    channels in the same Emotiv EPOC order as DREAMER, two peripheral ECG
-    columns that are ignored here, and ``valence``, ``arousal``,
-    ``dominance`` labels. This script groups by subject/trial, keeps the 14
-    EEG channels, extracts the center 60 s from each trial, and writes raw
-    labels with shape ``(n_subjects, n_trials, 2)`` using [valence,
-    arousal] only.
+    DEAP (preprocessed Python version):
+        s01.dat ... s32.dat — each is a pickle dict with keys:
+            'data'   : (40, 40, 8064)  trials x (32 EEG + 8 peripheral) x samples
+                       We keep only the first 32 channels (EEG).
+                       Signals are already downsampled to 128 Hz and filtered 4-45 Hz.
+                       The first 3 seconds of each trial (baseline) are pre-removed
+                       in some versions; we trim to the last 60 s (7680 samples).
+            'labels' : (40, 4)  valence, arousal, dominance, liking  (1-9 scale)
 
-    For backwards compatibility, the legacy ``Data_Preprocessed_P01.mat`` ...
-    ``Data_Preprocessed_P40.mat`` layout is still supported if the joined CSV
-    is not present.
+    DREAMER (dreamer_joined.csv):
+        Long/tidy format — one row per EEG sample with columns:
+            subject_id, trial_id, segment, sample_idx,
+            AF3, F7, F3, FC5, T7, P7, O1, O2, P8, T8, FC6, F4, F8, AF4,
+            ECG1, ECG2, valence, arousal, dominance
+        This script groups by subject_id/trial_id, keeps the 14 EEG channels, and
+        selects only the contiguous stimulus segment for each subject/trial and
+        applies EEGProc's preprocessing.bandpass_filter to that stimulus recording.
+        The retained waveforms are theta (4-8 Hz), alpha (8-13 Hz), and
+        beta (13-30 Hz); delta and gamma are omitted. A 50 Hz notch is applied
+        before the band-pass filters. The 14 x 3 channel-band outputs are
+        flattened channel-major, for example AF3_theta, AF3_alpha, AF3_beta,
+        F7_theta, ... .
+        Baseline rows are excluded. Stimulus lengths vary; filtering is performed
+        on the full contiguous stimulus before taking its middle 60 s (7680 samples),
+        which reduces boundary artifacts in the retained data.
+        This three-band representation matches DREAMER's published 4-30 Hz
+        preprocessing range and avoids constructing a gamma feature from data that
+        may already have been low-pass filtered at 30 Hz.
+        NOTE: even though the CSV includes dominance, this converter writes labels
+        with shape (n_subjects, 18, 2) using [valence, arousal] only.
 
-EEGEmotions (joined CSV + Cowen 27 mapping):
-        ``eegemotions_labeled.csv`` stores one EEG sample per row with columns:
-                subject_id, trial_id, segment, sample_idx,
-                AF3, F7, F3, FC5, T7, P7, O1, O2, P8, T8, FC6, F4, F8, AF4,
-                age, gender, nation, source_file, source_file_label,
-                emo_label_cowen_27, emo_label_ekman_6
-        This converter uses the 14 EEG channels above, keeps the first 27 emotion
-        trials for each complete subject, and extracts the center 60 s from each
-        trial. The labels can be written in one of two modes:
+    AMIGOS (joined CSV or legacy preprocessed Matlab version):
+        ``amigos_joined.csv`` is a long-form table with one row per EEG sample.
+        It contains ``subject_id``, ``trial_id``, ``sample_idx``, the 14 EEG
+        channels in the same Emotiv EPOC order as DREAMER, two peripheral ECG
+        columns that are ignored here, and ``valence``, ``arousal``,
+        ``dominance`` labels. This script groups by subject/trial, keeps the 14
+        EEG channels, extracts the center 60 s from each trial, and writes raw
+        labels with shape ``(n_subjects, n_trials, 2)`` using [valence,
+        arousal] only.
 
-        - ``emotion_27``: one-hot vectors with shape ``(n_subjects, 27)``
-        - ``valence_arousal``: mapped Cowen valence/arousal vectors with shape
-            ``(n_subjects, 2)``
+        For backwards compatibility, the legacy ``Data_Preprocessed_P01.mat`` ...
+        ``Data_Preprocessed_P40.mat`` layout is still supported if the joined CSV
+        is not present.
 
-        The accompanying ``cowen_27_valence_arousal.csv`` file provides the
-        emotion-to-valence/arousal mapping.
+    EEGEmotions (joined CSV + Cowen 27 mapping):
+            ``eegemotions_labeled.csv`` stores one EEG sample per row with columns:
+                    subject_id, trial_id, segment, sample_idx,
+                    AF3, F7, F3, FC5, T7, P7, O1, O2, P8, T8, FC6, F4, F8, AF4,
+                    age, gender, nation, source_file, source_file_label,
+                    emo_label_cowen_27, emo_label_ekman_6
+            This converter uses the 14 EEG channels above, keeps the first 27 emotion
+            trials for each complete subject, and extracts the center 60 s from each
+            trial. The labels can be written in one of two modes:
+
+            - ``emotion_27``: one-hot vectors with shape ``(n_subjects, 27)``
+            - ``valence_arousal``: mapped Cowen valence/arousal vectors with shape
+                ``(n_subjects, 2)``
+
+            The accompanying ``cowen_27_valence_arousal.csv`` file provides the
+            emotion-to-valence/arousal mapping.
 """
 
 import argparse

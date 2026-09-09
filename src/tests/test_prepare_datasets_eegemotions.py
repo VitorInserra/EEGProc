@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-from eegproc.deep_learning.supervised.stsnet.prepare_datasets import (
+from eegproc.deep_learning.prepare_datasets import (
     EEGEMOTIONS_N_CHANNELS,
     EEGEMOTIONS_N_TRIALS,
     EEGEMOTIONS_TRIAL_SAMPLES,

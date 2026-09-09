@@ -12,7 +12,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install deps
         run: |
@@ -21,11 +21,11 @@ jobs:
 
       - name: Generate API stubs
         run: |
-          python -m sphinx.ext.apidoc -o docs/source/api src/eegproc --module-first --separate --force
+          python -m sphinx.ext.apidoc -o docs/source/api src/eegproc --module-first --separate --force \
+            src/eegproc/deep_learning/cross_val.py
 
       - name: Build Sphinx
         run: |
-          pip install -e .
           python -m sphinx -W --keep-going -b html docs/source _site
           touch _site/.nojekyll
       - name: Deploy to GitHub Pages
