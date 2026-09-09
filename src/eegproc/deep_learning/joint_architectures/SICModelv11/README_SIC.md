@@ -49,11 +49,13 @@ The supplied scripts use \(d_g=384\).
 
 ### MTLFuseNet-style 3D-CNN branch
 
-The 3D-CNN receives the original channel-major band waveforms independently of
-the graph branch. Each timestep is scattered onto the DREAMER 9x9 electrode
-grid, with theta/alpha/beta as the three input channels. Its convolutions span
-time and both scalp axes. Max pooling and final averaging act only on the two
-spatial axes, so all 128 time samples remain aligned with the graph branch.
+The loader filters each complete trial into theta/alpha/beta before windowing,
+then stores those waveforms in channel-major, band-minor order. The 3D-CNN sums
+the three bands into the raw-like 4--30 Hz signal used by MTLFuseNet's
+spatio-temporal branch and scatters each timestep onto the DREAMER 9x9
+electrode grid. Its convolutions span time and both scalp axes. Max pooling and
+final averaging act only on the two spatial axes, so all 128 time samples
+remain aligned with the graph branch.
 The branch width is the final convolution's filter count:
 
 $$

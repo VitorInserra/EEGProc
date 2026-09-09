@@ -1,6 +1,6 @@
 # SIC MTLFuseNet-style 3D-CNN update
 
-SIC builder API version 15 replaces the within-window temporal BiLSTM with a
+SIC builder API version 16 replaces the within-window temporal BiLSTM with a
 spatio-temporal 3D-CNN while retaining the trial-level BiGRU classifier:
 
 ```text
@@ -11,9 +11,11 @@ channel-major 3-band EEG, one-second windows (128, 42)
     -> one VariationalClassifier logits head
 ```
 
-The 3D-CNN first restores each timestep's 14 Emotiv electrodes to the same
-9x9 scalp layout used by EEGProc's MTLFuseNet preprocessing. The input to
-`Conv3D` is `(time, grid-row, grid-column, frequency-band)`. Convolutions span
+The loader bandpass-filters each complete trial into theta/alpha/beta before
+windowing, producing the required channel-major `(128, 42)` inputs. The 3D-CNN
+sums those bands into MTLFuseNet's raw-like 4--30 Hz spatio-temporal signal and
+restores each timestep's 14 Emotiv electrodes to the same 9x9 scalp layout.
+The input to `Conv3D` is `(time, grid-row, grid-column, 1)`. Convolutions span
 time and both scalp axes; pooling acts only on the scalp axes. Spatial global
 average pooling therefore produces `(128, cnn3d_filters[-1])` without removing
 or reordering time.

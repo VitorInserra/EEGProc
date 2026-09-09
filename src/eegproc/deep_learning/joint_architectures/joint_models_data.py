@@ -57,9 +57,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Sequence
 
 import numpy as np
+from scipy.signal import butter, sosfiltfilt
 
 # ---------------------------------------------------------------------------
 # Dataset configuration
@@ -458,6 +459,51 @@ def window_trial_signal(
     return np.stack(windows, axis=0).astype(np.float32)
 
 
+def bandpass_trial_signal(
+    trial_signal: np.ndarray,
+    *,
+    fs: float,
+    bands: Sequence[tuple[float, float]],
+    order: int = 4,
+) -> np.ndarray:
+    """Bandpass one complete trial in channel-major, band-minor order.
+
+    Filtering before windowing avoids introducing a filter boundary at every
+    one-second window. An input shaped ``(channels, samples)`` becomes
+    ``(channels * bands, samples)`` with feature order
+    ``channel_0_band_0, channel_0_band_1, ...``.
+    """
+    signal = np.asarray(trial_signal, dtype=np.float32)
+    if signal.ndim != 2:
+        raise ValueError(
+            "trial_signal must have shape (channels, samples); "
+            f"got {signal.shape}."
+        )
+    resolved_bands = tuple((float(low), float(high)) for low, high in bands)
+    if not resolved_bands:
+        raise ValueError("bands must contain at least one (low, high) pair.")
+    nyquist = float(fs) / 2.0
+    filtered_bands = []
+    for low, high in resolved_bands:
+        if not 0.0 < low < high < nyquist:
+            raise ValueError(
+                f"Invalid band ({low}, {high}) for fs={fs}; expected "
+                f"0 < low < high < Nyquist ({nyquist})."
+            )
+        sos = butter(
+            int(order),
+            (low, high),
+            btype="bandpass",
+            fs=float(fs),
+            output="sos",
+        )
+        filtered_bands.append(sosfiltfilt(sos, signal, axis=-1))
+
+    # (bands, channels, samples) -> (channels, bands, samples) -> flattened
+    stacked = np.stack(filtered_bands, axis=0).transpose(1, 0, 2)
+    return stacked.reshape(-1, signal.shape[-1]).astype(np.float32)
+
+
 # ---------------------------------------------------------------------------
 # Full pipeline
 # ---------------------------------------------------------------------------
@@ -473,6 +519,7 @@ def build_dataset(
     overlap: float = 0.0,
     median_label: float | None = None,
     zscore: bool = True,
+    frequency_bands: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Build ``(feature_array, label_array, subject_id_array)`` for joint v2 training.
 
@@ -521,10 +568,17 @@ def build_dataset(
         (see ``zscore_subject_eeg``). STSNet itself performs no such
         normalization; this is added here because this model's decoder
         reconstructs raw amplitudes directly.
+    frequency_bands : sequence of (low, high), optional
+        Bandpass each complete trial before windowing and flatten the result
+        in channel-major, band-minor order. ``None`` preserves the raw-signal
+        behavior used by existing callers.
 
     Returns
     -------
-    feature_array : np.ndarray, shape (n_windows_total, timesteps, n_channels)
+    feature_array : np.ndarray
+        Shape ``(n_windows_total, timesteps, n_channels)`` without filtering,
+        or ``(n_windows_total, timesteps, n_channels * n_bands)`` when
+        ``frequency_bands`` is provided.
     label_array : np.ndarray, shape (n_windows_total,) or (n_windows_total, n_classes)
     subject_id_array : np.ndarray, shape (n_windows_total,)
 
@@ -561,8 +615,15 @@ def build_dataset(
             subject_eeg = zscore_subject_eeg(subject_eeg)
 
         for trial_idx in range(n_trials):
+            trial_signal = subject_eeg[trial_idx]
+            if frequency_bands is not None:
+                trial_signal = bandpass_trial_signal(
+                    trial_signal,
+                    fs=fs,
+                    bands=frequency_bands,
+                )
             trial_windows = window_trial_signal(
-                subject_eeg[trial_idx],
+                trial_signal,
                 window_size=window_size,
                 overlap=overlap,
             )
@@ -604,6 +665,7 @@ def build_joint_v2_dataset(
     median_label: float = DREAMER_MEDIAN_LABEL,
     zscore: bool = True,
     dataset: str | DatasetConfig = DREAMER_CONFIG,
+    frequency_bands: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Deprecated DREAMER-only alias for ``build_dataset``.
 
@@ -623,4 +685,5 @@ def build_joint_v2_dataset(
         overlap=overlap,
         median_label=median_label,
         zscore=zscore,
+        frequency_bands=frequency_bands,
     )

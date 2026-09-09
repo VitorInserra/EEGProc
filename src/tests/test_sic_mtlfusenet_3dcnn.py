@@ -25,16 +25,17 @@ def _small_encoder(**kwargs):
     )
 
 
-def test_channel_major_features_are_scattered_to_mtl_grid():
+def test_channel_major_bands_are_summed_and_scattered_to_mtl_grid():
     encoder = _small_encoder()
     inputs = np.arange(42, dtype=np.float32).reshape(1, 1, 42)
 
     grid = encoder._to_spatial_grid(inputs).numpy()
 
-    assert grid.shape == (1, 1, 9, 9, 3)
+    assert grid.shape == (1, 1, 9, 9, 1)
     for channel, (row, col) in enumerate(DREAMER_ELECTRODE_GRID):
-        np.testing.assert_array_equal(grid[0, 0, row, col], inputs[0, 0, 3 * channel:3 * channel + 3])
-    assert np.count_nonzero(grid) == np.count_nonzero(inputs)
+        expected = np.sum(inputs[0, 0, 3 * channel:3 * channel + 3])
+        np.testing.assert_array_equal(grid[0, 0, row, col], [expected])
+    assert np.count_nonzero(grid) == len(DREAMER_ELECTRODE_GRID)
 
 
 def test_encoder_preserves_time_and_backpropagates():

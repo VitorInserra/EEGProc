@@ -4,9 +4,9 @@ SIC stores each timestep in channel-major, band-minor order::
 
     AF3_theta, AF3_alpha, AF3_beta, F7_theta, ...
 
-This layer restores the 14 electrodes to the 9 x 9 scalp grid used by the
-repository's MTLFuseNet preprocessing, keeps the three frequency bands as
-input channels, and applies convolutions over time and the two scalp axes.
+This layer sums the theta/alpha/beta waveforms back into the raw-like 4--30 Hz
+signal used by MTLFuseNet's spatio-temporal branch, restores the 14 electrodes
+to its 9 x 9 scalp grid, and applies convolutions over time and both scalp axes.
 Only the spatial axes are pooled, so the output remains a feature sequence
 with one vector per input timestep and can be concatenated directly with the
 GCN-GRU branch.
@@ -174,7 +174,7 @@ class MTLFuseNet3DCNNEncoder(tf.keras.layers.Layer):
                 f"Input features={input_shape[-1]}, expected {expected_features}."
             )
         shape = tf.TensorShape(
-            (input_shape[0], input_shape[1], self.grid_size, self.grid_size, self.n_bands)
+            (input_shape[0], input_shape[1], self.grid_size, self.grid_size, 1)
         )
         for convolution, normalization, pooling, dropout in zip(
             self.convolutions,
@@ -213,10 +213,13 @@ class MTLFuseNet3DCNNEncoder(tf.keras.layers.Layer):
         channel_band = tf.reshape(
             inputs, (shape[0], shape[1], self.n_channels, self.n_bands)
         )
-        spatial = tf.einsum("ntck,cg->ntgk", channel_band, self._grid_projection)
+        raw_like_channels = tf.reduce_sum(channel_band, axis=-1, keepdims=True)
+        spatial = tf.einsum(
+            "ntck,cg->ntgk", raw_like_channels, self._grid_projection
+        )
         return tf.reshape(
             spatial,
-            (shape[0], shape[1], self.grid_size, self.grid_size, self.n_bands),
+            (shape[0], shape[1], self.grid_size, self.grid_size, 1),
         )
 
     def call(self, inputs, training: bool = False):

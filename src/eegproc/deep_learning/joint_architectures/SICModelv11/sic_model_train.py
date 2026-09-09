@@ -30,13 +30,14 @@ subjects and every remaining source subject in meta-train.  Each episode samples
 complete trials and applies one persistent outer update.
 
 SIC uses independent parallel deterministic branches. The complete GCN-GRU and
-raw-EEG BiLSTM feature vectors are concatenated without an encoder projection or
-bottleneck. In trial mode, every encoded timestep from every ordered window is
-passed to a GRU/BiGRU sequence summarizer; no temporal or cross-window mean is
-taken. That recurrent state goes directly to the sole VariationalClassifier
-logits head and to the subject adversary. Optional deterministic decoders
-reconstruct the original EEG independently from the GCN-GRU and BiLSTM feature
-sequences. There is no dense classifier stack, encoder VAE, or encoder KL loss.
+MTLFuseNet-style 3D-CNN feature vectors are concatenated without an encoder
+projection or bottleneck. In trial mode, every encoded timestep from every
+ordered window is passed to a GRU/BiGRU sequence summarizer; no temporal or
+cross-window mean is taken. That recurrent state goes directly to the sole
+VariationalClassifier logits head and to the subject adversary. Optional
+deterministic decoders reconstruct the input independently from the GCN-GRU and
+3D-CNN feature sequences. There is no dense classifier stack, encoder VAE, or
+encoder KL loss.
 
 CLI construction, JSON/grid decoding, validation, and conversion to the runtime
 configuration live in ``sic_model_args.py`` so this module stays focused on
@@ -115,6 +116,13 @@ except ImportError:
         build_joint_v2_dataset,
         get_dataset_config,
     )
+
+
+SIC_DREAMER_FREQUENCY_BANDS = (
+    (4.0, 8.0),  # theta
+    (8.0, 13.0),  # alpha
+    (13.0, 30.0),  # beta
+)
 
 
 def _json_fingerprint(value) -> str:
@@ -655,8 +663,20 @@ def load_sic_training_data(
     window_normalization="global_rms",
     label_threshold_mode="global",
     dataset="dreamer",
+    n_bands=3,
     return_original_ratings=False,
 ):
+    n_bands = int(n_bands)
+    if n_bands == 1:
+        frequency_bands = None
+    elif n_bands == len(SIC_DREAMER_FREQUENCY_BANDS):
+        frequency_bands = SIC_DREAMER_FREQUENCY_BANDS
+    else:
+        raise ValueError(
+            "SIC raw-data loading supports n_bands=1 (unfiltered waveform) "
+            f"or n_bands={len(SIC_DREAMER_FREQUENCY_BANDS)} "
+            "(theta/alpha/beta)."
+        )
     arrays = build_joint_v2_dataset(
         eeg_path=eeg_path,
         labels_path=labels_path,
@@ -667,6 +687,7 @@ def load_sic_training_data(
         median_label=median_label,
         zscore=False,
         dataset=dataset,
+        frequency_bands=frequency_bands,
     )
     if len(arrays) == 4:
         features, labels, subjects, trials = arrays
@@ -1568,6 +1589,7 @@ def main(argv=None):
         window_normalization=args.window_normalization,
         label_threshold_mode=args.label_threshold_mode,
         dataset=dataset_config,
+        n_bands=args.n_bands,
         # Raw ratings are always loaded so every run can report trial counts
         # for ratings 1--5 and majority-class baselines before training.
         return_original_ratings=True,
