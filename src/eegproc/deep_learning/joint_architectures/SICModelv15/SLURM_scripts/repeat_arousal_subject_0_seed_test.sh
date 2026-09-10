@@ -17,9 +17,8 @@ set -euo pipefail
 # resolved model config, saved model tensors, trial predictions, calibration
 # rows, and path-independent subject summary. Any mismatch fails the Slurm job.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FULL_RUN_SCRIPT="$SCRIPT_DIR/full_run_v15_arousal.sh"
 PROJECT_DIR="${PROJECT_DIR:-$HOME/EEGProc}"
+FULL_RUN_SCRIPT="${FULL_RUN_SCRIPT:-$PROJECT_DIR/src/eegproc/deep_learning/joint_architectures/SICModelv15/SLURM_scripts/full_run_v15_arousal.sh}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
 SUITE_ID="${SLURM_JOB_ID:-manual}"
 BASE_OUTPUT_DIR="${REPRO_OUTPUT_DIR:-$PROJECT_DIR/runs/reproducibility/sic_v15_arousal_cfg6/suite_${SUITE_ID}/subject_0}"
