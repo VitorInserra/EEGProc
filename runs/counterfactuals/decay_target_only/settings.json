@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-09-09T22:45:29.682809+00:00",
+  "created_at_utc": "2026-09-09T23:09:21.350486+00:00",
   "arguments": {
     "model": "runs/smoke/sic_v15_arousal_grid/DREAMER/arousal/suite_330197/users_0_3/smoke_arousal_0_3_grid_20260908_200512/configuration_0006/loso_zero_shot_models/loso_fold_0001_target_0_zero_shot.keras",
     "model_module": "eegproc.deep_learning.joint_architectures.SICModelv15.sic_model",
@@ -21,8 +21,9 @@
     ],
     "target_class": null,
     "target_probability": 0.6,
+    "target_loss_component": "confidence",
     "learning_rate": 1.0,
-    "learning_rate_decay": 0.2,
+    "learning_rate_decay": 0.7,
     "max_steps": 10,
     "gradient_clip_norm": 5.0,
     "target_weight": 1.0,
