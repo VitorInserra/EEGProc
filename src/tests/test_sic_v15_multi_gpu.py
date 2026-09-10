@@ -170,6 +170,18 @@ class V15MultiGPUChecks(unittest.TestCase):
 
 class FoldAllocationChecks(unittest.TestCase):
     __test__ = False
+    def test_subject_training_seed_is_stable_across_worker_layouts(self):
+        from src.eegproc.deep_learning.cross_val import _subject_training_seed
+
+        self.assertEqual(_subject_training_seed(42, 0), 42)
+        self.assertEqual(_subject_training_seed(42, 7), 49)
+        self.assertEqual(_subject_training_seed(42, np.int64(7)), 49)
+        self.assertEqual(
+            _subject_training_seed(42, "participant-7"),
+            _subject_training_seed(42, "participant-7"),
+        )
+        self.assertIsNone(_subject_training_seed(None, 7))
+
     def test_disjoint_pairs_and_short_allocations(self):
         from src.eegproc.deep_learning.cross_val import _resolve_fold_gpu_groups
         self.assertEqual(_resolve_fold_gpu_groups(2, [0, 1, 2, 3], 2), (2, ((0, 1), (2, 3))))

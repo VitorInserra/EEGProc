@@ -918,6 +918,8 @@ def _run_subject_calibration_configuration(
         subject_id_array=subjects,
         trial_id_array=trials,
         fixed_config=model_config,
+        training_seed=config.seed,
+        deterministic_training=config.deterministic_training,
         source_epochs=config.source_epochs,
         source_batch_size=config.source_batch_size,
         calibration_epochs=config.calibration_epochs,

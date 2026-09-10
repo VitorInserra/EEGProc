@@ -69,6 +69,7 @@ class SICTrainingConfig:
     target_subjects: tuple[int, ...] | None = None
     verbose: int = 1
     seed: int | None = 42
+    deterministic_training: bool = False
 
     label_threshold_mode: str = "global"
     median_label: float = 3.0
@@ -405,6 +406,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--deterministic-training",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Apply a stable per-target seed inside every spawned LOSO worker "
+            "and request deterministic TensorFlow operations."
+        ),
+    )
+    parser.add_argument(
         "--use-gcn-gru-branch",
         action=argparse.BooleanOptionalAction,
         default=None,
@@ -723,6 +733,7 @@ def training_config_from_args(
         ),
         verbose=args.verbose,
         seed=args.seed,
+        deterministic_training=args.deterministic_training,
         label_threshold_mode=args.label_threshold_mode,
         median_label=args.median_label,
         window_normalization=args.window_normalization,

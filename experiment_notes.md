@@ -71,3 +71,5 @@
     - Subject-specific calibration increases to 60% when using the subject adversarial head. *A good signal that the subadv head reduced subject-specific learning and increases the ability of the model to calibrate to a specific subject*.
     - Balanced MLDG trials with low outer epoch count (3) and high MLDG episodic epoch count show best learning.
     - Removing the subject adversarial head reduced BAcc to 52% on 0-shot and had subsequent decreasing accuracies on increasing calibration counts.
+- 09/10/2026
+    - SIC v15 fuses the 42 dimensional reconstruction and has shown better performance on early smoke tests. Replicability has shown to affect this though. We should now focus on making sure new processes don't change seeding.

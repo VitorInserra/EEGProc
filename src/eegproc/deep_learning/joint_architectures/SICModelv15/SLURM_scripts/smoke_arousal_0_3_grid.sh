@@ -12,9 +12,10 @@
 set -euo pipefail
 
 # Grid-search smoke run for DREAMER arousal targets 0, 1, 2, and 3.
-# Twelve configurations search focal gamma (0.0/0.5/1.0), VC classification
-# weight (1.0/2.0), and reconstruction weight (0.4/0.6). Configuration
-# selection maximizes mean zero-shot LOSO balanced accuracy.
+# Six configurations search focal gamma (0.2/0.5/1.0) and VC classification
+# weight (1.0/2.0), with reconstruction weight fixed at 0.6. Configuration
+# selection maximizes mean zero-shot LOSO balanced accuracy. Every candidate
+# uses the same deterministic per-target initialization for a fair comparison.
 #
 # SICModelv15 uses the learned convex joint reconstruction with initial
 # alpha=0.5 and auxiliary branch weight=0.25. Four allocated GPUs run two
@@ -34,12 +35,13 @@ EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
 LABELS_PATH="${LABELS_PATH:-$PROJECT_DIR/datasets/dreamer_labels.npy}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 
-# Match the 4 source / 10 calibration epochs used by v15 job 81133.
+# Match the 4 source / 10 calibration epochs used by arousal job 330197.
 SOURCE_EPOCHS="${SOURCE_EPOCHS:-4}"
 CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-10}"
 SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
+TRAINING_SEED="${TRAINING_SEED:-42}"
 SUITE_ID="${SLURM_JOB_ID:-manual}"
 TARGET_SUBJECTS=(0 1 2 3)
 
@@ -78,6 +80,11 @@ source "$VENV_DIR/bin/activate"
 
 export PYTHONNOUSERSITE=1
 export PYTHONUNBUFFERED=1
+export TRAINING_SEED
+export PYTHONHASHSEED="$TRAINING_SEED"
+export TF_DETERMINISTIC_OPS=1
+export TF_CUDNN_DETERMINISTIC=1
+export CUBLAS_WORKSPACE_CONFIG=:4096:8
 # Use CUDA's asynchronous allocator so TensorFlow can reuse fragmented GPU
 # memory for the large decoder-gradient temporaries created during MLDG.
 export TF_GPU_ALLOCATOR=cuda_malloc_async
@@ -126,11 +133,14 @@ if [[ -n "$MODULE_CUDA_ROOT" ]]; then
     export CUDA_PATH="$MODULE_CUDA_ROOT"
 fi
 
-# Twelve configurations vary only focal gamma, VC classification weight,
-# and reconstruction weight. Subject-adversarial and other VC regularization
-# weights remain fixed so zero-shot balanced accuracy isolates this search.
+# Six configurations vary only focal gamma and VC classification weight.
+# Reconstruction, subject-adversarial, and other VC regularization weights
+# remain fixed so zero-shot balanced accuracy isolates this small search.
 MODEL_CONFIG="$(python - <<'PY'
 import json
+import os
+
+seed = int(os.environ["TRAINING_SEED"])
 
 print(json.dumps({
     "optimizer_name": "adamw",
@@ -144,7 +154,7 @@ print(json.dumps({
     "mldg_steps_per_epoch": 20,
     "mldg_inner_learning_rate": 1e-4,
     "mldg_meta_test_weight": 1.0,
-    "mldg_seed": 42,
+    "mldg_seed": seed,
 
     "gcn_units": {"fixed": [128, 64]},
     "gcn_dropout": 0.1,
@@ -153,7 +163,7 @@ print(json.dumps({
     "spectral_gru_units": 384,
     "spectral_gru_dropout": 0.2,
     "mi_n_neighbors": 3,
-    "mi_random_state": 42,
+    "mi_random_state": seed,
     "mi_zero_diagonal": False,
     "mi_band_reduction": "mean",
     "mi_max_observations": 15000,
@@ -167,13 +177,13 @@ print(json.dumps({
     "n_classifier_rnn_layers": 2,
     "classifier_rnn_dropout": 0.4,
 
-    "focal_gamma": {"grid": [0.2, 0.5, 1.0]},
+    "focal_gamma": {"grid": [1.0]},
     "focal_alpha": None,
     "vc_loss_weight": 1.0,
-    "vc_alpha": {"grid": [1.0, 2.0]},
-    "vc_beta": 0.3,
+    "vc_alpha": {"grid": [2.0]},
+    "vc_beta": 0.0,
     "vc_gamma": 0.0,
-    "vc_lambda": 0.05,
+    "vc_lambda": 0.0,
     "update_vc_discriminator": False,
 
     "use_subject_adversarial": True,
@@ -211,12 +221,17 @@ echo "Parallelism: 2 folds x 2 GPUs; episode trials: 24 meta-train / 12 meta-tes
 echo "Per GPU: 12 meta-train / 6 meta-test trials; full-episode VC statistics"
 echo "Arousal retains 2 distinct trials/subject because some class pools contain only 1 trial."
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
-echo "Grid: focal_gamma=0.0,0.5,1.0; vc_alpha=1.0,2.0; reconstruction=0.4,0.6"
+echo "Grid: focal_gamma=0.2,0.5,1.0; vc_alpha=1.0,2.0; reconstruction=0.6 fixed"
 echo "Selection: maximize zero-shot LOSO balanced accuracy"
 echo "Subject loss weight: 0.2"
-echo "Joint reconstruction: weights=0.4,0.6 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configurations: 12 total; subject loss weight fixed at 0.2"
+echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
+echo "Configurations: 6 total; subject loss weight fixed at 0.2"
+echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
+echo "Git commit: $(git rev-parse HEAD)"
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+    echo "WARNING: tracked worktree changes are present; preserve this exact checkout with the results."
+fi
 python --version
 nvidia-smi
 
@@ -244,6 +259,7 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --source-epochs "$SOURCE_EPOCHS" \
     --source-batch-size "$SOURCE_BATCH_SIZE" \
     --validation-subjects 0 \
+    --validation-seed "$TRAINING_SEED" \
     --no-early-stopping \
     --calibration-epochs "$CALIBRATION_EPOCHS" \
     --calibration-batch-size "$CALIBRATION_BATCH_SIZE" \
@@ -252,7 +268,7 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --calibration-learning-rate 0.0001 \
     --calibration-optimizer adamw \
     --calibration-weight-decay 0.00005 \
-    --calibration-seed 42 \
+    --calibration-seed "$TRAINING_SEED" \
     --selection-metric balanced_accuracy \
     --hyperparameter-selection-level losocv \
     --decision-threshold 0.5 \
@@ -261,7 +277,7 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --prediction-diagnostics-every-n-epochs 1 \
     --prediction-diagnostics-max-samples "$PREDICTION_DIAGNOSTICS_MAX_SAMPLES" \
     --prediction-diagnostics-threshold-tolerance 0.01 \
-    --prediction-diagnostics-seed 42 \
+    --prediction-diagnostics-seed "$TRAINING_SEED" \
     --ece-bins 15 \
     --max-subjects 4 \
     --target-subjects "${TARGET_SUBJECTS[@]}" \
@@ -270,7 +286,8 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --gpu-ids 0 1 2 3 \
     --cpus-per-worker 4 \
     --verbose 2 \
-    --seed 42 \
+    --seed "$TRAINING_SEED" \
+    --deterministic-training \
     --label-threshold-mode global \
     --median-label 3 \
     --window-sec 1.0 \

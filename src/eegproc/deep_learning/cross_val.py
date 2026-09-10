@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import inspect
 import itertools
 import multiprocessing as mp
@@ -2096,6 +2097,30 @@ def _python_scalar(value):
     if isinstance(value, np.generic):
         return value.item()
     return value
+
+
+def _subject_training_seed(base_seed: int | None, target_subject) -> int | None:
+    """Derive a stable per-target TensorFlow seed from one experiment seed.
+
+    Numeric subject IDs use the intuitive ``base_seed + target_subject`` rule.
+    Other identifiers use SHA-256 instead of Python's salted ``hash()`` so the
+    result is stable in independently spawned interpreters.
+    """
+    if base_seed is None:
+        return None
+
+    subject_value = _python_scalar(target_subject)
+    if isinstance(subject_value, int) and not isinstance(subject_value, bool):
+        subject_offset = int(subject_value)
+    else:
+        token = repr(subject_value).encode("utf-8")
+        subject_offset = int.from_bytes(
+            hashlib.sha256(token).digest()[:8], byteorder="big", signed=False
+        )
+
+    # TensorFlow seeds use signed 32-bit integers. This also handles negative
+    # and nonnumeric subject identifiers without process-dependent behavior.
+    return (int(base_seed) + subject_offset) % (2**31 - 1)
 
 
 def _print_fold_header(fold_number: int, total_folds: int, description: str) -> None:
@@ -5038,6 +5063,8 @@ def _run_subject_calibration_subject(
     subject_id_array: np.ndarray,
     trial_id_array: np.ndarray,
     fixed_config: dict,
+    training_seed: int | None,
+    deterministic_training: bool,
     source_epochs: int,
     source_batch_size: int,
     validation_subjects_per_fold: int,
@@ -5090,6 +5117,12 @@ def _run_subject_calibration_subject(
     ``pretrained_model`` is an already-loaded, target-specific LOSO checkpoint.
     When it is provided, source construction and source fitting are skipped.
     """
+    subject_training_seed = _subject_training_seed(training_seed, target_subject)
+    if deterministic_training and subject_training_seed is None:
+        raise ValueError(
+            "deterministic_training requires a non-null training_seed."
+        )
+
     target_mask = subject_id_array == target_subject
     target_indices = np.flatnonzero(target_mask)
     outer_source_indices = np.flatnonzero(~target_mask)
@@ -5188,6 +5221,19 @@ def _run_subject_calibration_subject(
 
     if pretrained_model is None:
         tf.keras.backend.clear_session()
+    if subject_training_seed is not None:
+        # This runs in the target-subject worker after its GPU mask is installed
+        # and before any initializer, model, optimizer, or dropout RNG exists.
+        tf.keras.utils.set_random_seed(subject_training_seed)
+    if deterministic_training:
+        tf.config.experimental.enable_op_determinism()
+    if subject_training_seed is not None:
+        print(
+            f"[fold {subject_number}] target={_python_scalar(target_subject)!r} "
+            f"training_seed={subject_training_seed} "
+            f"deterministic_ops={bool(deterministic_training)}",
+            flush=True,
+        )
     try:
         if pretrained_model is not None:
             model = pretrained_model
@@ -5701,12 +5747,16 @@ def _run_subject_calibration_subject(
         }
         subject_summary = {
             "target_subject": _python_scalar(target_subject),
+            "training_seed": subject_training_seed,
+            "deterministic_training": bool(deterministic_training),
             "zero_shot_all_trials_scores": zero_all_scores,
             "calibration_levels": calibration_summaries,
         }
         return {
             "subject_number": int(subject_number),
             "target_subject": _python_scalar(target_subject),
+            "training_seed": subject_training_seed,
+            "deterministic_training": bool(deterministic_training),
             "source_subjects": [
                 _python_scalar(value)
                 for value in np.sort(np.unique(source_subject_ids)).tolist()
@@ -5819,6 +5869,8 @@ def subject_calibration_cv(
     calibration_batch_size: int = 6,
     *,
     pretrained_model: tf.keras.Model | None = None,
+    training_seed: int | None = None,
+    deterministic_training: bool = False,
     calibration_trials: int = 6,
     calibration_folds: int = 3,
     calibration_levels: list[tuple[int, int]] | tuple[tuple[int, int], ...] | None = None,
@@ -5892,6 +5944,10 @@ def subject_calibration_cv(
     Pass exactly one of ``model_builder_function`` and ``pretrained_model``.
     The pretrained path accepts one already-loaded, target-specific LOSO model,
     requires one explicit ``target_subjects`` entry, and skips source fitting.
+
+    When ``training_seed`` is set, every target receives a stable seed derived
+    from that base seed and the target ID. ``deterministic_training=True`` also
+    enables TensorFlow deterministic operations inside the target worker.
 
     For each target subject, a fresh subject-independent source model is first
     trained using the other subjects. When ``validation_subjects_per_fold`` is
@@ -6175,6 +6231,11 @@ def subject_calibration_cv(
                 "model is passed directly rather than serialized to workers."
             )
 
+    if deterministic_training and training_seed is None:
+        raise ValueError(
+            "deterministic_training requires a non-null training_seed."
+        )
+
     # Fail early if a usable calibration/evaluation split cannot be formed for
     # any selected subject, rather than discovering it after pretraining.
     for target_subject in target_subjects:
@@ -6210,6 +6271,8 @@ def subject_calibration_cv(
         "subject_id_array": subject_id_array,
         "trial_id_array": trial_id_array,
         "fixed_config": fixed_config,
+        "training_seed": training_seed,
+        "deterministic_training": bool(deterministic_training),
         "source_epochs": int(source_epochs),
         "source_batch_size": int(source_batch_size),
         "validation_subjects_per_fold": int(validation_subjects_per_fold),
@@ -6341,6 +6404,9 @@ def subject_calibration_cv(
             if pretrained_model is not None
             else "fit_in_cross_validation"
         ),
+        "training_seed": training_seed,
+        "deterministic_training": bool(deterministic_training),
+        "subject_seed_rule": "base_seed_plus_numeric_target_id_mod_2^31_minus_1",
         "n_calibration_fits": total_subjects * int(total_calibration_folds),
         "calibration_plan": [
             {"shots": int(shots), "folds": int(folds)}
@@ -6425,7 +6491,13 @@ def subject_calibration_cv(
         zero_all = dict(summary["zero_shot_all_trials_scores"])
         zero_all_subject_rows.append(zero_all)
 
-        flat_summary = {"target_subject": subject_output["target_subject"]}
+        flat_summary = {
+            "target_subject": subject_output["target_subject"],
+            "training_seed": subject_output.get("training_seed"),
+            "deterministic_training": subject_output.get(
+                "deterministic_training", False
+            ),
+        }
         zero_shot_model = subject_output.get("zero_shot_model")
         if zero_shot_model is not None:
             flat_summary["zero_shot_model_path"] = zero_shot_model["path"]
