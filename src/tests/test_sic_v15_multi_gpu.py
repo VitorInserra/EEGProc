@@ -50,7 +50,7 @@ class V15MultiGPUChecks(unittest.TestCase):
                        "mldg_role": tf.constant([0]*8 + [1]*4)}
         self.weights = tf.constant(np.linspace(0.5, 1.5, 12), tf.float32)
 
-    def build_model(self, parallel=False, dropout=0.0):
+    def build_model(self, parallel=False, dropout=0.0, deterministic=False):
         with tf.device(self.devices[0]):
             model = self.builder(
                 (2, 4, 6), adjacency=np.eye(2), n_channels=2, n_bands=3,
@@ -70,7 +70,10 @@ class V15MultiGPUChecks(unittest.TestCase):
                 use_class_weight=True,
             )
         if parallel:
-            model.configure_fold_devices(self.devices)
+            model.configure_fold_devices(
+                self.devices,
+                deterministic_execution=deterministic,
+            )
         return model
 
     def assert_tensors_close(self, left, right, label=""):
@@ -166,6 +169,57 @@ class V15MultiGPUChecks(unittest.TestCase):
             restored = tf.keras.models.load_model(path, compile=False)
             self.assertFalse(getattr(restored, "_fold_devices", ()))
             np.testing.assert_allclose(before, restored(self.eeg, training=False), rtol=1e-5, atol=1e-6)
+
+    def test_deterministic_fit_with_dropout_is_bitwise_repeatable(self):
+        tf.config.experimental.enable_op_determinism()
+        tf.config.experimental.set_synchronous_execution(True)
+
+        def run_once():
+            tf.keras.backend.clear_session()
+            tf.keras.utils.set_random_seed(1942)
+            model = self.build_model(
+                True,
+                dropout=0.1,
+                deterministic=True,
+            )
+            self.assertTrue(model.run_eagerly)
+            y = np.tile([0, 1], 6)
+            trial_ids = np.tile([0, 1], 6)
+            model.set_source_training_metadata(
+                self.subjects.numpy(),
+                trial_ids,
+            )
+            x = model.prepare_fit_inputs(
+                self.eeg.numpy(),
+                self.subjects.numpy(),
+            )
+            history = model.fit(x, y, epochs=2, verbose=0)
+            return (
+                [np.asarray(value).copy() for value in model.weights],
+                {
+                    key: np.asarray(values).copy()
+                    for key, values in history.history.items()
+                },
+            )
+
+        first_weights, first_history = run_once()
+        second_weights, second_history = run_once()
+        self.assertEqual(first_history.keys(), second_history.keys())
+        for name in first_history:
+            np.testing.assert_array_equal(
+                first_history[name],
+                second_history[name],
+                err_msg=f"History {name!r} is not bitwise repeatable.",
+            )
+        self.assertEqual(len(first_weights), len(second_weights))
+        for index, (first, second) in enumerate(
+            zip(first_weights, second_weights)
+        ):
+            np.testing.assert_array_equal(
+                first,
+                second,
+                err_msg=f"Model tensor {index} is not bitwise repeatable.",
+            )
 
 
 class FoldAllocationChecks(unittest.TestCase):

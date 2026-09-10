@@ -5227,6 +5227,11 @@ def _run_subject_calibration_subject(
         tf.keras.utils.set_random_seed(subject_training_seed)
     if deterministic_training:
         tf.config.experimental.enable_op_determinism()
+        # The custom v15 multi-GPU path is intentionally outside a distribution
+        # strategy.  Synchronous eager dispatch plus run_eagerly (configured
+        # below) gives its device shards a fixed launch/completion order instead
+        # of allowing graph scheduling differences to perturb gradient sums.
+        tf.config.experimental.set_synchronous_execution(True)
     if subject_training_seed is not None:
         print(
             f"[fold {subject_number}] target={_python_scalar(target_subject)!r} "
@@ -5262,10 +5267,19 @@ def _run_subject_calibration_subject(
             devices = tuple(device.name for device in tf.config.list_logical_devices("GPU"))
             if len(devices) != gpus_per_fold:
                 raise RuntimeError(f"Expected {gpus_per_fold} fold GPUs, found {devices}.")
-            configure_devices(devices)
+            configure_devices(
+                devices,
+                deterministic_execution=bool(deterministic_training),
+            )
+            if deterministic_training and not model.run_eagerly:
+                raise RuntimeError(
+                    "Deterministic multi-GPU training requires eager train-step "
+                    "execution so device shards run in a fixed order."
+                )
             print(
                 f"[fold {subject_number}] MLDG source devices={devices}; "
-                "one global VC objective and one inner/outer update per episode",
+                "one global VC objective and one inner/outer update per episode; "
+                f"execution={'serial_eager' if model.run_eagerly else 'parallel_graph'}",
                 flush=True,
             )
 
@@ -6406,6 +6420,13 @@ def subject_calibration_cv(
         ),
         "training_seed": training_seed,
         "deterministic_training": bool(deterministic_training),
+        "deterministic_multi_gpu_execution": (
+            "serial_eager_device_shards"
+            if deterministic_training and gpus_per_fold > 1
+            else "tensorflow_op_determinism"
+            if deterministic_training
+            else None
+        ),
         "subject_seed_rule": "base_seed_plus_numeric_target_id_mod_2^31_minus_1",
         "n_calibration_fits": total_subjects * int(total_calibration_folds),
         "calibration_plan": [

@@ -8,8 +8,10 @@ optimizers, gradient caching, or temporal truncation are introduced.
 
 Only trial embeddings/logits and small reconstruction/reporting tensors are
 gathered; the large encoder, recurrent, and decoder activations stay on the
-device that computed them. Keras Model.fit's graph executor can schedule the
-independent device branches concurrently.
+device that computed them. Keras Model.fit's normal graph executor can schedule
+the independent device branches concurrently. Reproducibility mode instead
+runs this same Python device loop eagerly and synchronously, giving the shards
+a fixed execution order without moving their activations off-device.
 """
 
 from __future__ import annotations

@@ -2212,15 +2212,39 @@ class SICModel(tf.keras.Model):
             vrex_components=vrex_components,
         )
 
-    def configure_fold_devices(self, devices):
+    def configure_fold_devices(
+        self,
+        devices,
+        *,
+        deterministic_execution: bool = False,
+    ):
         """Place MLDG trial forwards on a fold's isolated GPU group.
 
         Device placement is runtime-only: checkpoints remain ordinary v15
         models, and calibration/inference retain their existing execution.
+
+        TensorFlow's graph executor may run independent device shards in a
+        different order from one process to the next.  That is desirable for
+        throughput, but even tiny floating-point differences are amplified by
+        recurrent MLDG training.  Deterministic execution therefore runs the
+        same multi-device code eagerly: the Python device loop becomes the
+        fixed execution order while activations remain split across GPUs.
         """
         from .multi_gpu import validate_fold_devices
 
         self._fold_devices = validate_fold_devices(self, devices)
+        self._deterministic_fold_execution = bool(deterministic_execution)
+        if self._deterministic_fold_execution and len(self._fold_devices) > 1:
+            # Recompile before the first fit so Keras does not wrap train_step
+            # in a tf.function that can schedule independent GPU branches in
+            # completion order.  Reuse the freshly-created optimizers; no
+            # optimizer state exists at this point.
+            self.compile(
+                main_optimizer=self.main_optimizer,
+                vc_discriminator_optimizer=self.vc_discriminator_optimizer,
+                run_eagerly=True,
+                jit_compile=False,
+            )
         self.train_function = None
 
     def _encode_mldg(self, eeg_inputs, *, training):

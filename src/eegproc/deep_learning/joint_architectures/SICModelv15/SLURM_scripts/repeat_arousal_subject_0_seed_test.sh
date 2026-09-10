@@ -7,13 +7,14 @@
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --time=02:00:00
+#SBATCH --time=08:00:00
 
 set -euo pipefail
 
 # Run the exact arousal smoke winner twice for target subject 0 in independent
 # spawned workers. Both repetitions use the same base seed and deterministic
-# TensorFlow settings from full_run_v15_arousal.sh. Afterward, compare the
+# TensorFlow settings and fixed-order two-GPU execution from
+# full_run_v15_arousal.sh. Afterward, compare the
 # resolved model config, saved model tensors, trial predictions, calibration
 # rows, and path-independent subject summary. Any mismatch fails the Slurm job.
 
@@ -22,6 +23,8 @@ FULL_RUN_SCRIPT="${FULL_RUN_SCRIPT:-$PROJECT_DIR/src/eegproc/deep_learning/joint
 TRAINING_SEED="${TRAINING_SEED:-42}"
 SUITE_ID="${SLURM_JOB_ID:-manual}"
 BASE_OUTPUT_DIR="${REPRO_OUTPUT_DIR:-$PROJECT_DIR/runs/reproducibility/sic_v15_arousal_cfg6/suite_${SUITE_ID}/subject_0}"
+REPRO_SOURCE_EPOCHS="${REPRO_SOURCE_EPOCHS:-4}"
+REPRO_CALIBRATION_EPOCHS="${REPRO_CALIBRATION_EPOCHS:-10}"
 
 if [[ ! -f "$FULL_RUN_SCRIPT" ]]; then
     echo "ERROR: full-run launcher not found: $FULL_RUN_SCRIPT"
@@ -33,6 +36,7 @@ echo "Subject: 0"
 echo "Repetitions: 2"
 echo "Base seed: $TRAINING_SEED (effective subject seed is also $TRAINING_SEED)"
 echo "Fixed configuration: focal_gamma=1.0 vc_alpha=2.0 reconstruction=0.6 subject_loss=0.2"
+echo "Repeatability budget: $REPRO_SOURCE_EPOCHS source epochs, $REPRO_CALIBRATION_EPOCHS calibration epochs"
 echo "Output root: $BASE_OUTPUT_DIR"
 
 for repetition in 1 2; do
@@ -52,6 +56,8 @@ for repetition in 1 2; do
     SIC_N_JOBS="1" \
     SIC_GPU_IDS="0 1" \
     SIC_RUN_PREFLIGHT="$RUN_PREFLIGHT" \
+    SOURCE_EPOCHS="$REPRO_SOURCE_EPOCHS" \
+    CALIBRATION_EPOCHS="$REPRO_CALIBRATION_EPOCHS" \
         bash "$FULL_RUN_SCRIPT"
 done
 
@@ -66,7 +72,13 @@ fi
 export CONFIG_ONE CONFIG_TWO BASE_OUTPUT_DIR TRAINING_SEED
 
 cd "$PROJECT_DIR"
-python - <<'PY_COMPARE'
+echo
+echo "Comparing deterministic artifacts"
+echo "Repetition 1: $CONFIG_ONE"
+echo "Repetition 2: $CONFIG_TWO"
+# Keep a comparison traceback in the main Slurm output so a failed seed test
+# can be diagnosed from the same log as the two training repetitions.
+python - 2>&1 <<'PY_COMPARE'
 from __future__ import annotations
 
 import csv

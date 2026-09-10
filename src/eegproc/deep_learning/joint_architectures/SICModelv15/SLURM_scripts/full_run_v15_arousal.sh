@@ -249,6 +249,7 @@ echo "Subject loss weight: 0.2"
 echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
 echo "Configuration source: arousal smoke job 330197 configuration 6"
 echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
+echo "Deterministic two-GPU mode: fixed-order eager device shards (activations remain split)"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 echo "Git commit: $(git rev-parse HEAD)"
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
