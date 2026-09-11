@@ -288,6 +288,7 @@ class VariationalClassifier(tf.keras.layers.Layer):
         label_smoothing: float = 0.0,
         focal_gamma: float = 1.0,
         focal_alpha: float | Sequence[float] | None = None,
+        logit_scale: float = 1.0,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -302,6 +303,9 @@ class VariationalClassifier(tf.keras.layers.Layer):
         if not np.isfinite(self.focal_gamma) or self.focal_gamma < 0.0:
             raise ValueError("focal_gamma must be finite and non-negative.")
         self.focal_alpha = _normalize_focal_alpha(focal_alpha, self.n_classes)
+        self.logit_scale = float(logit_scale)
+        if not np.isfinite(self.logit_scale) or self.logit_scale <= 0.0:
+            raise ValueError("logit_scale must be finite and positive.")
         self._last_mh = None
 
     def build(self, input_shape) -> None:
@@ -410,7 +414,11 @@ class VariationalClassifier(tf.keras.layers.Layer):
         latent_dim = tf.cast(tf.shape(mh)[-1], mh.dtype)
         normalized_log_prior = log_class_prior / latent_dim
 
-        return log_likelihoods + normalized_log_prior[tf.newaxis, :]
+        logits = log_likelihoods + normalized_log_prior[tf.newaxis, :]
+        # The Gaussian score is a per-dimension mean. A scale of latent_dim
+        # recovers the summed Gaussian log-joint temperature while keeping the
+        # historical default (one) for existing checkpoints.
+        return tf.cast(self.logit_scale, logits.dtype) * logits
     
     def discriminator(self, z: tf.Tensor, y: int) -> tf.Tensor:
         """Return the trainable discriminator score T_psi^y(z)."""
@@ -716,6 +724,7 @@ class VariationalClassifier(tf.keras.layers.Layer):
                 "label_smoothing": self.label_smoothing,
                 "focal_gamma": self.focal_gamma,
                 "focal_alpha": self.focal_alpha,
+                "logit_scale": self.logit_scale,
             }
         )
         return config

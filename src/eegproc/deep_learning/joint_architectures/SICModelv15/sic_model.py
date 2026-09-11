@@ -573,6 +573,7 @@ class SICModel(tf.keras.Model):
         vc_beta: float = 0.5,
         vc_gamma: float = 0.0,
         vc_lambda: float = 0.0,
+        vc_logit_scale: float = 1.0,
         update_vc_discriminator: bool = False,
         reconstruction_loss_weight: float = 0.10,
         joint_reconstruction_auxiliary_weight: float = 0.25,
@@ -733,6 +734,8 @@ class SICModel(tf.keras.Model):
             raise ValueError("bilstm_dropout must be in [0, 1).")
         if not 0.0 <= float(label_smoothing) < 1.0:
             raise ValueError("label_smoothing must be in [0, 1).")
+        if not np.isfinite(float(vc_logit_scale)) or float(vc_logit_scale) <= 0.0:
+            raise ValueError("vc_logit_scale must be finite and positive.")
         for loss_name, value in (
             ("vc_loss_weight", vc_loss_weight),
             ("reconstruction_loss_weight", reconstruction_loss_weight),
@@ -813,6 +816,7 @@ class SICModel(tf.keras.Model):
         self.vc_beta = float(vc_beta)
         self.vc_gamma = float(vc_gamma)
         self.vc_lambda = float(vc_lambda)
+        self.vc_logit_scale = float(vc_logit_scale)
         self.update_vc_discriminator = bool(update_vc_discriminator)
         self.reconstruction_loss_weight = float(reconstruction_loss_weight)
         self.joint_reconstruction_auxiliary_weight = float(
@@ -976,6 +980,7 @@ class SICModel(tf.keras.Model):
             label_smoothing=self.label_smoothing,
             focal_gamma=self.focal_gamma,
             focal_alpha=vc_focal_alpha,
+            logit_scale=self.vc_logit_scale,
             name="v6_vc_target",
         )
         # This is the sole classification head. Explicitly build its learned
@@ -2690,6 +2695,7 @@ class SICModel(tf.keras.Model):
                 "vc_beta": self.vc_beta,
                 "vc_gamma": self.vc_gamma,
                 "vc_lambda": self.vc_lambda,
+                "vc_logit_scale": self.vc_logit_scale,
                 "update_vc_discriminator": self.update_vc_discriminator,
                 "reconstruction_loss_weight": self.reconstruction_loss_weight,
                 "joint_reconstruction_auxiliary_weight": (
@@ -2800,6 +2806,7 @@ def build_sic_model(
     vc_beta: float = 0.5,
     vc_gamma: float = 0.0,
     vc_lambda: float = 0.0,
+    vc_logit_scale: float = 1.0,
     update_vc_discriminator: bool = False,
     reconstruction_loss_weight: float = 0.10,
     joint_reconstruction_auxiliary_weight: float = 0.25,
@@ -3021,6 +3028,7 @@ def build_sic_model(
         vc_beta=float(vc_beta),
         vc_gamma=float(vc_gamma),
         vc_lambda=float(vc_lambda),
+        vc_logit_scale=float(vc_logit_scale),
         update_vc_discriminator=bool(update_vc_discriminator),
         reconstruction_loss_weight=float(reconstruction_loss_weight),
         joint_reconstruction_auxiliary_weight=float(

@@ -42,6 +42,8 @@ SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
+VC_LOGIT_SCALE="${VC_LOGIT_SCALE:-128.0}"
+export VC_LOGIT_SCALE
 SUITE_ID="${SLURM_JOB_ID:-manual}"
 TARGET_SUBJECTS=(0 1 2 3)
 
@@ -184,6 +186,7 @@ print(json.dumps({
     "vc_beta": 0.0,
     "vc_gamma": 0.0,
     "vc_lambda": 0.0,
+    "vc_logit_scale": float(os.environ["VC_LOGIT_SCALE"]),
     "update_vc_discriminator": False,
 
     "use_subject_adversarial": True,
@@ -224,6 +227,7 @@ echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
 echo "Grid: focal_gamma=0.2,0.5,1.0; vc_alpha=1.0,2.0; reconstruction=0.6 fixed"
 echo "Selection: maximize zero-shot LOSO balanced accuracy"
 echo "Subject loss weight: 0.2"
+echo "VC logit scale: $VC_LOGIT_SCALE"
 echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
 echo "Configurations: 6 total; subject loss weight fixed at 0.2"
 echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
