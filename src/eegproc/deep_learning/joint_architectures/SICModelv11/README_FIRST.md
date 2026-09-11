@@ -47,7 +47,24 @@ continues to mean trial BiGRU plus VC head.
 
 ## Longleaf order
 
-From the project root, first run one four-subject smoke test per label:
+The Conv3D branch processes every window in a trial batch. The launchers use a
+memory-safe source batch of 8 trials for ERM and V-REx; increase it only after
+measuring GPU memory. MLDG defaults to two trials per subject so arousal folds
+with only one available trial in a subject/class pool remain valid.
+
+Before the full experiment, submit the five classification-first diagnostics
+from the project root:
+
+```bash
+bash src/eegproc/deep_learning/joint_architectures/SICModelv11/SLURM_scripts/submit_sic_classification_diagnostics.sh
+```
+
+These jobs compare fused ERM, 3D-CNN-only ERM, GCN-GRU-only ERM, arousal MLDG,
+and weak-adversary valence MLDG. They disable the decoder and VC auxiliary
+regularizers so encoder/classifier learning can be established before adding
+the subject-invariance and reconstruction objectives back.
+
+For a conventional one-off four-subject smoke test per label:
 
 ```bash
 TARGET_DIMENSION=valence sbatch src/eegproc/deep_learning/joint_architectures/SICModelv11/SLURM_scripts/smoke_test_sic_mldg_brier_ablations.sh
@@ -65,3 +82,10 @@ TARGET_DIMENSION=arousal sbatch src/eegproc/deep_learning/joint_architectures/SI
 
 API-v14/BiLSTM checkpoints are intentionally incompatible with this update;
 retrain the LOSO population models before calibration.
+
+The smoke and full launchers accept environment overrides for
+`SMOKE_PROFILE`, `SOURCE_BATCH_SIZE`, `MLDG_TRIALS_PER_SUBJECT`, `USE_DECODER`,
+`USE_SUBJECT_ADVERSARIAL`, `SUBJECT_ADVERSARIAL_WEIGHT`, `SUBJECT_LOSS_WEIGHT`,
+`LEARNING_RATE`, `FOCAL_GAMMA`, `VC_BETA`, `VC_LAMBDA`, and
+`CALIBRATION_USE_VC_TARGET`. Set `VC_BETA=grid` to retain the historical
+two-value `[0.2, 0.6]` grid.

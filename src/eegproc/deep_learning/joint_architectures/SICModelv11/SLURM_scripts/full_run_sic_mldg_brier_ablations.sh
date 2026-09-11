@@ -15,7 +15,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Full experiment organization
 # ---------------------------------------------------------------------------
-# This worker targets SIC builder API v15: deterministic window encoders,
+# This worker targets SIC builder API v17: deterministic window encoders,
 # independent branch decoders, and a trial-level BiGRU classifier with no
 # averaging across EEG windows.
 # One Slurm array task runs one one-factor-at-a-time ablation. The %2 limit
@@ -46,7 +46,9 @@ VENV_DIR="${VENV_DIR:-$PROJECT_DIR/venv312}"
 SOURCE_EPOCHS="${SOURCE_EPOCHS:-3}"
 CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-20}"
 MLDG_STEPS_PER_EPOCH="${MLDG_STEPS_PER_EPOCH:-20}"
-SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
+# A trial contains 60 one-second windows. Conv3D therefore sees
+# SOURCE_BATCH_SIZE * 60 windows internally; 64 trials exhausts a 46-GB L40S.
+SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-8}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 TARGET_DIMENSION="${TARGET_DIMENSION:-valence}"
@@ -57,7 +59,17 @@ PREDICTION_DIAGNOSTICS_EVERY_N_EPOCHS="${PREDICTION_DIAGNOSTICS_EVERY_N_EPOCHS:-
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 RECONSTRUCTION_LOSS_WEIGHT="${RECONSTRUCTION_LOSS_WEIGHT:-0.10}"
 DECODER_DROPOUT="${DECODER_DROPOUT:-0.10}"
-EXPECTED_SIC_API_VERSION=15
+USE_DECODER="${USE_DECODER:-true}"
+USE_SUBJECT_ADVERSARIAL="${USE_SUBJECT_ADVERSARIAL:-true}"
+SUBJECT_ADVERSARIAL_WEIGHT="${SUBJECT_ADVERSARIAL_WEIGHT:-0.6}"
+SUBJECT_LOSS_WEIGHT="${SUBJECT_LOSS_WEIGHT:-1.0}"
+MLDG_TRIALS_PER_SUBJECT="${MLDG_TRIALS_PER_SUBJECT:-2}"
+LEARNING_RATE="${LEARNING_RATE:-0.0001}"
+FOCAL_GAMMA="${FOCAL_GAMMA:-0.5}"
+VC_BETA="${VC_BETA:-grid}"
+VC_LAMBDA="${VC_LAMBDA:-0.05}"
+CALIBRATION_USE_VC_TARGET="${CALIBRATION_USE_VC_TARGET:-true}"
+EXPECTED_SIC_API_VERSION=17
 SUITE_ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}"
 
 EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
@@ -199,7 +211,17 @@ MODEL_GRID="$(python - \
     "$MLDG_STEPS_PER_EPOCH" \
     "$VREX_PENALTY_WEIGHT" \
     "$RECONSTRUCTION_LOSS_WEIGHT" \
-    "$DECODER_DROPOUT" <<'PY'
+    "$DECODER_DROPOUT" \
+    "$USE_DECODER" \
+    "$USE_SUBJECT_ADVERSARIAL" \
+    "$SUBJECT_ADVERSARIAL_WEIGHT" \
+    "$SUBJECT_LOSS_WEIGHT" \
+    "$MLDG_TRIALS_PER_SUBJECT" \
+    "$LEARNING_RATE" \
+    "$FOCAL_GAMMA" \
+    "$VC_BETA" \
+    "$VC_LAMBDA" \
+    "$CALIBRATION_USE_VC_TARGET" <<'PY'
 import json
 import sys
 
@@ -210,11 +232,22 @@ mldg_steps_per_epoch = int(sys.argv[4])
 vrex_penalty_weight = float(sys.argv[5])
 reconstruction_loss_weight = float(sys.argv[6])
 decoder_dropout = float(sys.argv[7])
+use_decoder = sys.argv[8].lower() == "true"
+use_subject_adversarial = sys.argv[9].lower() == "true"
+subject_adversarial_weight = float(sys.argv[10])
+subject_loss_weight = float(sys.argv[11])
+mldg_trials_per_subject = int(sys.argv[12])
+learning_rate = float(sys.argv[13])
+focal_gamma = float(sys.argv[14])
+vc_beta_arg = sys.argv[15].strip().lower()
+vc_beta = {"grid": [0.2, 0.6]} if vc_beta_arg == "grid" else float(vc_beta_arg)
+vc_lambda = float(sys.argv[16])
+calibration_use_vc_target = sys.argv[17].lower() == "true"
 
 print(json.dumps({
     # Source optimizer. The method itself is selected by --training-method.
     "optimizer_name": "adamw",
-    "learning_rate": 1e-4,
+    "learning_rate": learning_rate,
     "weight_decay": 5e-5,
     "vrex_penalty_weight": vrex_penalty_weight,
 
@@ -222,7 +255,7 @@ print(json.dumps({
     # subject-adversarial loss on A; complete VC emotion loss on adapted B.
     "mldg_meta_train_subjects": 8,
     "mldg_meta_test_subjects": 4,
-    "mldg_trials_per_subject": 3,
+    "mldg_trials_per_subject": mldg_trials_per_subject,
     "mldg_steps_per_epoch": mldg_steps_per_epoch,
     "mldg_inner_learning_rate": 1e-4,
     "mldg_meta_test_weight": 1.0,
@@ -241,8 +274,8 @@ print(json.dumps({
     "mi_band_reduction": "mean",
     "mi_max_observations": 15000,
 
-    # MTLFuseNet-style spatio-temporal branch. Pool only scalp-space axes so
-    # every original sample remains in the sequence passed to the trial BiGRU.
+    # MTLFuseNet-style spatio-temporal branch returns one embedding per
+    # one-second window; the trial BiGRU models the ordered window sequence.
     "cnn3d_filters": {"fixed": [32, 64, 128]},
     "cnn3d_temporal_kernel_size": 7,
     "cnn3d_spatial_kernel_size": 3,
@@ -259,33 +292,33 @@ print(json.dumps({
     "classifier_rnn_dropout": 0.40,
 
     # VariationalClassifier-head regularizers. The VC is the sole logits head.
-    "focal_gamma": 0.5,
+    "focal_gamma": focal_gamma,
     "focal_alpha": None,
     "vc_loss_weight": 1.0,
     "vc_alpha": 1.0,
-    "vc_beta": {"grid": [0.2, 0.6]},
+    "vc_beta": vc_beta,
     "vc_gamma": 0.0,
-    "vc_lambda": 0.05,
+    "vc_lambda": vc_lambda,
     "update_vc_discriminator": False,
 
     # Subject-invariance objective on the learned trial representation.
-    "use_subject_adversarial": True,
-    "subject_adversarial_weight": 0.6,
-    "subject_loss_weight": 1.0,
+    "use_subject_adversarial": use_subject_adversarial,
+    "subject_adversarial_weight": subject_adversarial_weight,
+    "subject_loss_weight": subject_loss_weight,
     "subject_hidden_units": 64,
     "subject_dropout": 0.0,
 
     # Selected architecture/data ablation.
     "use_gcn_gru_branch": use_gcn_gru,
     "use_cnn3d_branch": use_cnn3d,
-    "use_decoder": True,
+    "use_decoder": use_decoder,
     "reconstruction_loss_weight": reconstruction_loss_weight,
     "decoder_dropout": decoder_dropout,
     "remove_median_label": remove_median,
 
     # Two layers means BiGRU + VC during target-subject calibration.
     "calibration_unfreeze_layers": 2,
-    "calibration_use_vc_target": True,
+    "calibration_use_vc_target": calibration_use_vc_target,
     "calibration_vc_alpha": 1.0,
     "calibration_vc_beta": 0.4,
     "calibration_vc_gamma": 0.0,
@@ -305,6 +338,8 @@ echo "Ablation profile: $ABLATION_PROFILE"
 echo "Target: $TARGET_DIMENSION"
 echo "Training method: $TRAINING_METHOD"
 echo "Branches: GCN-GRU=$use_gcn_gru 3D-CNN=$use_cnn3d"
+echo "Source batch: $SOURCE_BATCH_SIZE trials; MLDG trials/subject: $MLDG_TRIALS_PER_SUBJECT"
+echo "Loss isolation: decoder=$USE_DECODER subject_adversarial=$USE_SUBJECT_ADVERSARIAL vc_beta=$VC_BETA vc_lambda=$VC_LAMBDA focal_gamma=$FOCAL_GAMMA"
 echo "Decoder: independent branches, reconstruction_weight=$RECONSTRUCTION_LOSS_WEIGHT dropout=$DECODER_DROPOUT"
 echo "Remove median trials: $remove_median"
 echo "Trial classifier: BiGRU [128,64] units/direction, final width 128, no cross-window averaging"
