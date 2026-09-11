@@ -11,10 +11,11 @@
 
 set -euo pipefail
 
-# Run the exact winning arousal smoke configuration (job 330197,
-# configuration 6) on every DREAMER LOSO target. This is one fixed
-# configuration: focal_gamma=1.0, vc_alpha=2.0,
-# reconstruction_loss_weight=0.6, and subject_loss_weight=0.2.
+# Run the successful scale-64 arousal smoke configuration (suite 798030,
+# task 0) on every DREAMER LOSO target. This is one fixed configuration:
+# focal_gamma=1.0, vc_alpha=2.0, vc_logit_scale=64.0, source-side
+# vc_beta=vc_lambda=0.0, reconstruction_loss_weight=0.6, and
+# subject_loss_weight=0.2.
 #
 # SICModelv15 adds the learned convex joint reconstruction. Its v15 defaults
 # are made explicit below: initial alpha=0.5 and auxiliary branch weight=0.25.
@@ -35,16 +36,17 @@ EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
 LABELS_PATH="${LABELS_PATH:-$PROJECT_DIR/datasets/dreamer_labels.npy}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 
-# Match the 4 source / 10 calibration epochs used by arousal job 330197.
+# Keep the 4 source epochs used by the smoke run and limit calibration to 2
+# epochs to reduce the late calibration drift observed in suite 798030.
 SOURCE_EPOCHS="${SOURCE_EPOCHS:-4}"
-CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-10}"
+CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-2}"
 SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
 SUITE_ID="${SLURM_JOB_ID:-manual}"
-SIC_RUN_NAME="${SIC_RUN_NAME:-full_run_v15_arousal}"
-SIC_OUTPUT_DIR="${SIC_OUTPUT_DIR:-runs/full/sic_v15_arousal_cfg6/DREAMER/arousal/suite_${SUITE_ID}/full}"
+SIC_RUN_NAME="${SIC_RUN_NAME:-full_run_v15_arousal_scale64}"
+SIC_OUTPUT_DIR="${SIC_OUTPUT_DIR:-runs/full/sic_v15_arousal_scale64/DREAMER/arousal/suite_${SUITE_ID}/full}"
 SIC_TARGET_SUBJECTS="${SIC_TARGET_SUBJECTS:-}"
 SIC_EXPECTED_GPUS="${SIC_EXPECTED_GPUS:-4}"
 SIC_N_JOBS="${SIC_N_JOBS:-2}"
@@ -157,7 +159,7 @@ if [[ -n "$MODULE_CUDA_ROOT" ]]; then
     export CUDA_PATH="$MODULE_CUDA_ROOT"
 fi
 
-# One fixed configuration reproduces arousal smoke job 330197 configuration 6.
+# One fixed configuration reproduces arousal smoke suite 798030 task 0.
 MODEL_CONFIG="$(python - <<'PY'
 import json
 import os
@@ -203,9 +205,10 @@ print(json.dumps({
     "focal_alpha": None,
     "vc_loss_weight": 1.0,
     "vc_alpha": 2.0,
-    "vc_beta": 0.3,
+    "vc_beta": 0.0,
     "vc_gamma": 0.0,
-    "vc_lambda": 0.05,
+    "vc_lambda": 0.0,
+    "vc_logit_scale": 64.0,
     "update_vc_discriminator": False,
 
     "use_subject_adversarial": True,
@@ -244,10 +247,10 @@ echo "Per GPU: 12 meta-train / 6 meta-test trials; full-episode VC statistics"
 echo "Arousal retains 2 distinct trials/subject because some class pools contain only 1 trial."
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
 echo "Selection: maximize zero-shot LOSO balanced accuracy"
-echo "Fixed smoke winner: focal_gamma=1.0 vc_alpha=2.0 reconstruction=0.6"
+echo "Fixed smoke winner: focal_gamma=1.0 vc_alpha=2.0 vc_beta=0.0 vc_lambda=0.0 vc_logit_scale=64.0 reconstruction=0.6"
 echo "Subject loss weight: 0.2"
 echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configuration source: arousal smoke job 330197 configuration 6"
+echo "Configuration source: arousal smoke suite 798030 task 0"
 echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
 echo "Deterministic two-GPU mode: fixed-order eager device shards (activations remain split)"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
