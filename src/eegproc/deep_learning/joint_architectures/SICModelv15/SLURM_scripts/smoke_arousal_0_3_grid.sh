@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=smoke_arousal_0_3_grid
-#SBATCH --output=smoke_arousal_0_3_grid_%j.out
-#SBATCH --error=smoke_arousal_0_3_grid_%j.err
+#SBATCH --output=smoke_arousal_0_3_grid_%A_%a.out
+#SBATCH --error=smoke_arousal_0_3_grid_%A_%a.err
 #SBATCH --partition=l40-gpu
 #SBATCH --qos=gpu_access
+#SBATCH --array=0-1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
@@ -12,10 +13,10 @@
 set -euo pipefail
 
 # Grid-search smoke run for DREAMER arousal targets 0, 1, 2, and 3.
-# Six configurations search focal gamma (0.2/0.5/1.0) and VC classification
-# weight (1.0/2.0), with reconstruction weight fixed at 0.6. Configuration
-# selection maximizes mean zero-shot LOSO balanced accuracy. Every candidate
-# uses the same deterministic per-target initialization for a fair comparison.
+# Two Slurm array tasks test VC logit scales (inverse temperatures) 64 and 16.
+# Each task runs the fixed focal-gamma/VC-weight smoke configuration and uses
+# the same deterministic per-target initialization for a fair comparison.
+# Selection maximizes mean zero-shot LOSO balanced accuracy.
 #
 # SICModelv15 uses the learned convex joint reconstruction with initial
 # alpha=0.5 and auxiliary branch weight=0.25. Four allocated GPUs run two
@@ -42,9 +43,15 @@ SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
-VC_LOGIT_SCALE="${VC_LOGIT_SCALE:-128.0}"
+TEMPERATURES=(64 16)
+TASK_INDEX="${SLURM_ARRAY_TASK_ID:-0}"
+if [[ ! "$TASK_INDEX" =~ ^[0-9]+$ ]] || (( TASK_INDEX >= ${#TEMPERATURES[@]} )); then
+    echo "ERROR: SLURM_ARRAY_TASK_ID must be between 0 and $((${#TEMPERATURES[@]} - 1)); got $TASK_INDEX."
+    exit 1
+fi
+VC_LOGIT_SCALE="${TEMPERATURES[$TASK_INDEX]}"
 export VC_LOGIT_SCALE
-SUITE_ID="${SLURM_JOB_ID:-manual}"
+SUITE_ID="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}"
 TARGET_SUBJECTS=(0 1 2 3)
 
 CALIBRATION_LEVEL_ARGS=(
@@ -216,6 +223,7 @@ PY
 
 echo "SIC builder: v15"
 echo "Job ID: ${SLURM_JOB_ID:-local}"
+echo "Array task: $TASK_INDEX"
 echo "Node: $(hostname)"
 echo "Dataset/target: DREAMER arousal"
 echo "Target subjects: ${TARGET_SUBJECTS[*]}"
@@ -224,12 +232,12 @@ echo "Parallelism: 2 folds x 2 GPUs; episode trials: 24 meta-train / 12 meta-tes
 echo "Per GPU: 12 meta-train / 6 meta-test trials; full-episode VC statistics"
 echo "Arousal retains 2 distinct trials/subject because some class pools contain only 1 trial."
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
-echo "Grid: focal_gamma=0.2,0.5,1.0; vc_alpha=1.0,2.0; reconstruction=0.6 fixed"
+echo "Temperature grid: vc_logit_scale=$VC_LOGIT_SCALE (task values: 64,16)"
+echo "Within-task configuration: focal_gamma=1.0; vc_alpha=2.0; reconstruction=0.6"
 echo "Selection: maximize zero-shot LOSO balanced accuracy"
 echo "Subject loss weight: 0.2"
-echo "VC logit scale: $VC_LOGIT_SCALE"
 echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configurations: 6 total; subject loss weight fixed at 0.2"
+echo "Configurations: 1 per task, 2 across the array; subject loss weight fixed at 0.2"
 echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 echo "Git commit: $(git rev-parse HEAD)"
@@ -257,8 +265,8 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --classification-level trial \
     --n-channels 14 \
     --n-bands 3 \
-    --out-dir "runs/smoke/sic_v15_arousal_grid/DREAMER/arousal/suite_${SUITE_ID}/users_0_3" \
-    --run-name "smoke_arousal_0_3_grid" \
+    --out-dir "runs/smoke/sic_v15_arousal_grid/DREAMER/arousal/suite_${SUITE_ID}/temperature_${VC_LOGIT_SCALE}/users_0_3" \
+    --run-name "smoke_arousal_0_3_grid_temperature_${VC_LOGIT_SCALE}" \
     --training-method mldg \
     --source-epochs "$SOURCE_EPOCHS" \
     --source-batch-size "$SOURCE_BATCH_SIZE" \
