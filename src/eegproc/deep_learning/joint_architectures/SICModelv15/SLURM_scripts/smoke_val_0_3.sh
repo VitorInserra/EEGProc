@@ -42,7 +42,7 @@ SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
-TEMPERATURES=(64 16)
+TEMPERATURES=(64)
 TASK_INDEX="${SLURM_ARRAY_TASK_ID:-0}"
 if [[ ! "$TASK_INDEX" =~ ^[0-9]+$ ]] || (( TASK_INDEX >= ${#TEMPERATURES[@]} )); then
     echo "ERROR: SLURM_ARRAY_TASK_ID must be between 0 and $((${#TEMPERATURES[@]} - 1)); got $TASK_INDEX."
@@ -185,13 +185,13 @@ print(json.dumps({
     "n_classifier_rnn_layers": 2,
     "classifier_rnn_dropout": 0.4,
 
-    "focal_gamma": {"grid": [1.0]},
+    "focal_gamma": {"grid": [0.5]},
     "focal_alpha": None,
     "vc_loss_weight": 1.0,
     "vc_alpha": {"grid": [2.0]},
-    "vc_beta": 0.0,
+    "vc_beta": 0.3,
     "vc_gamma": 0.0,
-    "vc_lambda": 0.0,
+    "vc_lambda": 0.05,
     "vc_logit_scale": float(os.environ["VC_LOGIT_SCALE"]),
     "update_vc_discriminator": False,
 

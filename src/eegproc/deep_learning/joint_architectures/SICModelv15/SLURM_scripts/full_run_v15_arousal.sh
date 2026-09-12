@@ -11,19 +11,17 @@
 
 set -euo pipefail
 
-# Run the successful scale-64 arousal smoke configuration (suite 798030,
-# task 0) on every DREAMER LOSO target. This is one fixed configuration:
-# focal_gamma=1.0, vc_alpha=2.0, vc_logit_scale=64.0, source-side
-# vc_beta=vc_lambda=0.0, reconstruction_loss_weight=0.6, and
-# subject_loss_weight=0.2.
+# Full run for all 23 DREAMER arousal LOSO target subjects.
+# This runs the fixed scale-64 focal-gamma/VC-weight smoke configuration and uses
+# the same deterministic per-target initialization for a fair comparison.
+# Selection maximizes mean zero-shot LOSO balanced accuracy.
 #
-# SICModelv15 adds the learned convex joint reconstruction. Its v15 defaults
-# are made explicit below: initial alpha=0.5 and auxiliary branch weight=0.25.
-# Four allocated GPUs run two folds concurrently on pairs (0,1) and (2,3).
-# DREAMER arousal includes subjects with only one low-arousal trial. Preserve
-# the existing 12 meta-train + 6 meta-test subjects x 2 distinct trials setup:
-# 24/12 trials globally, 12/6 per GPU. Four trials per subject would require
-# two distinct trials from each class and fail for those subjects.
+# SICModelv15 uses the learned convex joint reconstruction with initial
+# alpha=0.5 and auxiliary branch weight=0.25. Four allocated GPUs run two
+# folds concurrently on pairs (0,1) and (2,3). DREAMER arousal includes
+# subjects with only one low-arousal trial, so preserve the 12 meta-train +
+# 6 meta-test subjects x 2 distinct trials setup: 24/12 trials globally and
+# 12/6 per GPU.
 
 module purge
 module load python/3.12.4
@@ -36,39 +34,16 @@ EEG_PATH="${EEG_PATH:-$PROJECT_DIR/datasets/dreamer_eeg.npy}"
 LABELS_PATH="${LABELS_PATH:-$PROJECT_DIR/datasets/dreamer_labels.npy}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-0}"
 
-# Keep the 4 source epochs used by the smoke run and limit calibration to 2
-# epochs to reduce the late calibration drift observed in suite 798030.
+# Match the 4 source / 10 calibration epochs used by arousal job 330197.
 SOURCE_EPOCHS="${SOURCE_EPOCHS:-4}"
-CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-2}"
+CALIBRATION_EPOCHS="${CALIBRATION_EPOCHS:-10}"
 SOURCE_BATCH_SIZE="${SOURCE_BATCH_SIZE:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-64}"
 PREDICTION_DIAGNOSTICS_MAX_SAMPLES="${PREDICTION_DIAGNOSTICS_MAX_SAMPLES:-10000}"
 TRAINING_SEED="${TRAINING_SEED:-42}"
+VC_LOGIT_SCALE=64
+export VC_LOGIT_SCALE
 SUITE_ID="${SLURM_JOB_ID:-manual}"
-SIC_RUN_NAME="${SIC_RUN_NAME:-full_run_v15_arousal_scale64}"
-SIC_OUTPUT_DIR="${SIC_OUTPUT_DIR:-runs/full/sic_v15_arousal_scale64/DREAMER/arousal/suite_${SUITE_ID}/full}"
-SIC_TARGET_SUBJECTS="${SIC_TARGET_SUBJECTS:-}"
-SIC_EXPECTED_GPUS="${SIC_EXPECTED_GPUS:-4}"
-SIC_N_JOBS="${SIC_N_JOBS:-2}"
-SIC_GPU_IDS="${SIC_GPU_IDS:-0 1 2 3}"
-SIC_RUN_PREFLIGHT="${SIC_RUN_PREFLIGHT:-1}"
-
-read -r -a GPU_ID_ARRAY <<< "$SIC_GPU_IDS"
-if [[ "${#GPU_ID_ARRAY[@]}" -ne "$SIC_EXPECTED_GPUS" ]]; then
-    echo "ERROR: SIC_GPU_IDS contains ${#GPU_ID_ARRAY[@]} IDs but SIC_EXPECTED_GPUS=$SIC_EXPECTED_GPUS."
-    exit 1
-fi
-if (( SIC_N_JOBS * 2 > SIC_EXPECTED_GPUS )); then
-    echo "ERROR: $SIC_N_JOBS concurrent folds require $((SIC_N_JOBS * 2)) GPUs."
-    exit 1
-fi
-TARGET_SUBJECT_ARGS=()
-SCOPE_DESCRIPTION="all 23 LOSO target subjects"
-if [[ -n "$SIC_TARGET_SUBJECTS" ]]; then
-    read -r -a TARGET_SUBJECT_ARRAY <<< "$SIC_TARGET_SUBJECTS"
-    TARGET_SUBJECT_ARGS=(--target-subjects "${TARGET_SUBJECT_ARRAY[@]}")
-    SCOPE_DESCRIPTION="target subjects: ${TARGET_SUBJECT_ARRAY[*]}"
-fi
 
 CALIBRATION_LEVEL_ARGS=(
     --calibration-level 3 6
@@ -110,7 +85,6 @@ export PYTHONHASHSEED="$TRAINING_SEED"
 export TF_DETERMINISTIC_OPS=1
 export TF_CUDNN_DETERMINISTIC=1
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
-export SIC_EXPECTED_GPUS
 # Use CUDA's asynchronous allocator so TensorFlow can reuse fragmented GPU
 # memory for the large decoder-gradient temporaries created during MLDG.
 export TF_GPU_ALLOCATOR=cuda_malloc_async
@@ -159,7 +133,9 @@ if [[ -n "$MODULE_CUDA_ROOT" ]]; then
     export CUDA_PATH="$MODULE_CUDA_ROOT"
 fi
 
-# One fixed configuration reproduces arousal smoke suite 798030 task 0.
+# Six configurations vary only focal gamma and VC classification weight.
+# Reconstruction, subject-adversarial, and other VC regularization weights
+# remain fixed so zero-shot balanced accuracy isolates this small search.
 MODEL_CONFIG="$(python - <<'PY'
 import json
 import os
@@ -201,14 +177,14 @@ print(json.dumps({
     "n_classifier_rnn_layers": 2,
     "classifier_rnn_dropout": 0.4,
 
-    "focal_gamma": 1.0,
+    "focal_gamma": {"grid": [1.0]},
     "focal_alpha": None,
     "vc_loss_weight": 1.0,
-    "vc_alpha": 2.0,
+    "vc_alpha": {"grid": [2.0]},
     "vc_beta": 0.0,
     "vc_gamma": 0.0,
     "vc_lambda": 0.0,
-    "vc_logit_scale": 64.0,
+    "vc_logit_scale": float(os.environ["VC_LOGIT_SCALE"]),
     "update_vc_discriminator": False,
 
     "use_subject_adversarial": True,
@@ -240,19 +216,19 @@ echo "SIC builder: v15"
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Node: $(hostname)"
 echo "Dataset/target: DREAMER arousal"
-echo "Scope: $SCOPE_DESCRIPTION"
+echo "Scope: all 23 LOSO target subjects"
 echo "Training: MLDG, $SOURCE_EPOCHS source epochs, 12+6 subjects x 2 trials = 36 trials/episode"
-echo "Parallelism: $SIC_N_JOBS concurrent fold(s) x 2 GPUs; episode trials: 24 meta-train / 12 meta-test"
+echo "Parallelism: 2 folds x 2 GPUs; episode trials: 24 meta-train / 12 meta-test"
 echo "Per GPU: 12 meta-train / 6 meta-test trials; full-episode VC statistics"
 echo "Arousal retains 2 distinct trials/subject because some class pools contain only 1 trial."
 echo "Calibration: $CALIBRATION_EPOCHS epochs at 3/6/9/12 shots"
+echo "Fixed temperature: vc_logit_scale=$VC_LOGIT_SCALE"
+echo "Within-task configuration: focal_gamma=1.0; vc_alpha=2.0; reconstruction=0.6"
 echo "Selection: maximize zero-shot LOSO balanced accuracy"
-echo "Fixed smoke winner: focal_gamma=1.0 vc_alpha=2.0 vc_beta=0.0 vc_lambda=0.0 vc_logit_scale=64.0 reconstruction=0.6"
 echo "Subject loss weight: 0.2"
 echo "Joint reconstruction: weight=0.6 initial alpha=0.5 auxiliary branch weight=0.25"
-echo "Configuration source: arousal smoke suite 798030 task 0"
+echo "Configurations: 1 fixed scale-64 configuration; subject loss weight fixed at 0.2"
 echo "Deterministic training: enabled; base seed=$TRAINING_SEED; subject seed=base+target ID"
-echo "Deterministic two-GPU mode: fixed-order eager device shards (activations remain split)"
 echo "TensorFlow GPU allocator: $TF_GPU_ALLOCATOR"
 echo "Git commit: $(git rev-parse HEAD)"
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
@@ -261,20 +237,14 @@ fi
 python --version
 nvidia-smi
 
-# Verify the allocation and the two-GPU training path before the run.
+# Verify the allocation and the two-GPU training path before the full run.
 python - <<'PY_GPU'
-import os
 import tensorflow as tf
-expected = int(os.environ["SIC_EXPECTED_GPUS"])
 n = len(tf.config.list_physical_devices("GPU"))
-if n != expected:
-    raise SystemExit(
-        f"This run requires exactly {expected} allocated GPUs; visible={n}"
-    )
+if n != 4:
+    raise SystemExit(f"This full run requires exactly 4 allocated GPUs; visible={n}")
 PY_GPU
-if [[ "$SIC_RUN_PREFLIGHT" == "1" ]]; then
-    EEGPROC_TEST_GPUS=1 python -m src.tests.test_sic_v15_multi_gpu
-fi
+EEGPROC_TEST_GPUS=1 python -m src.tests.test_sic_v15_multi_gpu
 
 python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_train \
     --training-protocol loso_validation \
@@ -285,8 +255,8 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --classification-level trial \
     --n-channels 14 \
     --n-bands 3 \
-    --out-dir "$SIC_OUTPUT_DIR" \
-    --run-name "$SIC_RUN_NAME" \
+    --out-dir "runs/full/sic_v15_arousal_scale64/DREAMER/arousal/suite_${SUITE_ID}/all_subjects" \
+    --run-name "full_run_v15_arousal_scale64" \
     --training-method mldg \
     --source-epochs "$SOURCE_EPOCHS" \
     --source-batch-size "$SOURCE_BATCH_SIZE" \
@@ -311,10 +281,9 @@ python -m src.eegproc.deep_learning.joint_architectures.SICModelv15.sic_model_tr
     --prediction-diagnostics-threshold-tolerance 0.01 \
     --prediction-diagnostics-seed "$TRAINING_SEED" \
     --ece-bins 15 \
-    "${TARGET_SUBJECT_ARGS[@]}" \
-    --n-jobs "$SIC_N_JOBS" \
+    --n-jobs 2 \
     --gpus-per-fold 2 \
-    --gpu-ids "${GPU_ID_ARRAY[@]}" \
+    --gpu-ids 0 1 2 3 \
     --cpus-per-worker 4 \
     --verbose 2 \
     --seed "$TRAINING_SEED" \
